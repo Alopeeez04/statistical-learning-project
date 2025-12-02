@@ -170,7 +170,7 @@ for (var in cont_vars) {
   new_data <- new_data[new_data[[var]] >= lower_bound & new_data[[var]] <= upper_bound, ]
 }
 
-print("Outliers rmeoved")
+print("Outliers removed")
 ```
 
 # Check if the outliers were removed
