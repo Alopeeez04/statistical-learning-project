@@ -156,6 +156,35 @@ for (var in cont_vars) {
 ```
 #we have some outliers, we need to remove them 
 
+# Removing outliers
+
+```{r}
+for (var in cont_vars) {
+  Q1 <- quantile(new_data[[var]], 0.25)
+  Q3 <- quantile(new_data[[var]], 0.75)
+  IQR <- Q3 - Q1
+  lower_bound <- Q1 - 1.5 * IQR
+  upper_bound <- Q3 + 1.5 * IQR
+  
+  # filters data removing outliers
+  new_data <- new_data[new_data[[var]] >= lower_bound & new_data[[var]] <= upper_bound, ]
+}
+
+print("Outliers rmeoved")
+```
+
+# Check if the outliers were removed
+
+```{r}
+for (var in cont_vars) {
+  Q1 <- quantile(new_data[[var]], 0.25)
+  Q3 <- quantile(new_data[[var]], 0.75)
+  IQR <- Q3 - Q1
+  outliers <- new_data[[var]][new_data[[var]] < (Q1 - 1.5*IQR) | new_data[[var]] > (Q3 + 1.5*IQR)]
+  print(paste(var, "outliers:", length(outliers)))
+}
+```
+
 
 
 
