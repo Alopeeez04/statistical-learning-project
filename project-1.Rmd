@@ -18,7 +18,7 @@ library(psych)
 
 # import the dataset 
 ```{r}
-data <- read.csv("Heart.csv", header = TRUE, stringsAsFactors = FALSE)
+data <- read.csv("41598_2018_29592_MOESM3_ESM.xlsx", header = TRUE, stringsAsFactors = FALSE)
 
 ```
 
