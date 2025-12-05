@@ -1,0 +1,177 @@
+---
+title: "project"
+author: ""
+date: "2025-11-25"
+output: html_document
+---
+
+# Import Library
+
+```{r}
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+```
+
+# Import dataset
+
+```{r}
+raw_df <- read_excel("41598_2018_29592_MOESM2_ESM.xlsx")
+```
+
+```{r}
+sex <- unlist(raw_df[3, -1])
+sex <- as.factor(sex)
+
+df <- read_excel("41598_2018_29592_MOESM2_ESM.xlsx", skip = 6)
+
+glimpse(df)
+```
+
+# Cleaning and Data Transformation
+
+```{r}
+# organize names
+# first df line has de colnames
+colnames(df) <- df[1, ]
+
+df <- df[-1, ]
+
+# convert to numeric
+for (i in 17:ncol(df)) {  # first 16 columns = metadata
+  df[[i]] <- as.numeric(df[[i]])
+}
+
+X <- df[, 17:ncol(df)] 
+
+Y <- sex
+
+colnames(X) <- paste0("S", seq_len(ncol(X)))
+
+# number of metabolites and samples
+dim(X)
+
+```
+
+It matches with the article 120 samples (60 males + 60 females)
+
+# Summary statistics
+
+```{r}
+summary(X)
+```
+
+```{r}
+# Count total zero values
+sum(X == 0, na.rm = TRUE)
+```
+
+```{r}
+# Missing values check
+sum(is.na(X))
+```
+
+# Is it the data Gaussian Distributed?
+
+```{r}
+par(mfrow=c(1,2))
+hist(as.numeric(X[1,]), main="Raw Distribution", xlab="Intensity")
+qqnorm(as.numeric(X[1,]), main="QQ Plot Raw")
+qqline(as.numeric(X[1,]))
+par(mfrow=c(1,1))
+```
+
+# Non linear
+
+```{r}
+# Convert to standard data frame to avoid tibble recycling issues
+X_nozero <- as.data.frame(X)
+
+for(i in 1:nrow(X_nozero)){
+  row_vals <- as.numeric(X_nozero[i, ])  # convert row to numeric vector
+
+  # Safeguard: if the row is all zeros (rare but possible)
+  if(all(row_vals == 0)){
+    row_vals[row_vals == 0] <- 1  # placeholder before log10
+  } else {
+    min_val <- min(row_vals[row_vals > 0], na.rm = TRUE)
+    row_vals[row_vals == 0] <- min_val / 2
+  }
+
+  X_nozero[i, ] <- row_vals  # assign back properly
+}
+```
+
+The matrix was transposed so that samples correspond to rows and metabolites to columns, which is the correct structure required for multivariate analyses such as PCA and PLS-DA, where each row must represent an independent observation:
+
+-   With X_scaled \<- scale(t(X_log)).
+
+```{r}
+# Log10 transformation
+X_log <- log10(X_nozero)
+
+# Scaling for PCA (samples as rows)
+X_scaled <- scale(t(X_log))
+
+# PCA
+pca <- prcomp(X_scaled, center = TRUE, scale. = FALSE)
+summary(pca)
+
+```
+
+-   Summary statistics show very different scales and non-normal distributions
+
+-   A few zero values detected → replaced with half of minimum value\
+    → required for log10 transformation
+
+-   Applied log10(x) to reduce skewness and stabilize variance
+
+-   Autoscaling (mean-center + unit variance) to make metabolites comparable
+
+```{r}
+sex_row <- as.character(raw_df[3, ])
+
+sample_names_raw <- sex_row[sex_row %in% c("Male", "Female")]
+
+sample_cols <- colnames(X)
+
+sex <- factor(sample_names_raw[1:length(sample_cols)])
+
+length(sex)
+table(sex)
+
+all(!is.na(sex))
+identical(length(sex), nrow(pca$x))
+
+```
+
+```{r}
+score_df <- data.frame(
+  PC1 = pca$x[,1],
+  PC2 = pca$x[,2],
+  Sex = sex
+)
+
+ggplot(score_df, aes(PC1, PC2, color = Sex)) +
+  geom_point(size = 3) +
+  theme_classic() +
+  ggtitle("PCA After Log10 Transform + Scaling")
+
+
+```
+
+```{r}
+# Scree plot (PCA Variance Explained)
+variance <- pca$sdev^2 / sum(pca$sdev^2)
+
+plot(variance[1:10], type="b", pch=19,
+     xlab="PC", ylab="Proportion of Variance",
+     main="Scree Plot - PCA")
+
+```
+
+-   Score plot shows a trend of separation between Male and Female
+
+-   Some possible outliers appear (next step: detection)
+
+-   Scree Plot indicates PC1+PC2 explain \~20–30% variance → normal for metabolomics
