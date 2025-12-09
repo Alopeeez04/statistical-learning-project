@@ -11,6 +11,13 @@ output: html_document
 library(readxl)
 library(tidyverse)
 library(ggplot2)
+library(ellipse)
+library(caret)
+library(pROC)
+library(pls)
+library(DescTools)
+library(dplyr)
+library(mixOmics)
 ```
 
 # Import dataset
@@ -146,6 +153,37 @@ identical(length(sex), nrow(pca$x))
 ```
 
 ```{r}
+pca_scores <- as.data.frame(pca$x[, 1:2])
+
+
+center <- colMeans(pca_scores)
+cov_mat <- cov(pca_scores)
+
+distances <- mahalanobis(pca_scores, center, cov_mat)
+
+# Cutoff (chi with p=0.95 and 2 df)
+cutoff <- qchisq(0.95, df = 2)
+
+# plot with condidese matrix
+plot(pca$x[,1], pca$x[,2], 
+     pch = 19, 
+     col = ifelse(distances > cutoff, "red", "black"), # Outliers a vermelho
+     xlab = "PC1", ylab = "PC2", 
+     main = "PCA Outlier Detection (95% CI)")
+
+lines(ellipse(cov_mat, centre = center, level = 0.95), col="blue", lty=2)
+
+text(pca$x[,1], pca$x[,2], 
+     labels = ifelse(distances > cutoff, rownames(pca$x), ""), 
+     pos = 3, cex = 0.7)
+
+# Identify outliers
+outliers <- which(distances > cutoff)
+print(paste("Outliers detected:", length(outliers)))
+```
+
+
+```{r}
 score_df <- data.frame(
   PC1 = pca$x[,1],
   PC2 = pca$x[,2],
@@ -169,6 +207,124 @@ plot(variance[1:10], type="b", pch=19,
      main="Scree Plot - PCA")
 
 ```
+```{r}
+set.seed(123)
+
+train_index <- createDataPartition(sex, p = 0.7, list = FALSE)
+
+X_train <- X_scaled[train_index, ]
+X_test  <- X_scaled[-train_index, ]
+
+X_train <- as.data.frame(X_train)
+X_test  <- as.data.frame(X_test)
+
+y_train <- sex[train_index]
+y_test  <- sex[-train_index]
+
+pvals <- apply(X_train, 2, function(x) t.test(x ~ y_train)$p.value)
+pvals_fdr <- p.adjust(pvals, method = "fdr")
+
+head(sort(pvals_fdr))
+
+
+```
+
+
+```{r}
+#Initial PLS-DA model
+pls_initial <- plsda(X_train, y_train, ncomp = 5)
+
+plotIndiv(pls_initial, comp = c(1,2),
+          group = y_train, legend = TRUE,
+          title = "Initial PLS-DA (Training Set)")
+
+
+
+
+```
+```{r}
+#Internal Validation: 5-Fold CV + AUCROC
+set.seed(123)
+
+folds <- createFolds(y_train, k = 5, returnTrain = TRUE)
+auc_results <- data.frame(LV = integer(), AUC = numeric())
+
+for (lv in 1:5) {
+  auc_fold <- c()
+  
+  for (f in folds) {
+    model <- plsda(X_train[f,], y_train[f], ncomp = lv)
+    pred <- predict(model, X_train[-f,])$predict[,1,lv]
+    roc_obj <- roc(y_train[-f], pred)
+    auc_fold <- c(auc_fold, auc(roc_obj))
+  }
+  
+  auc_results <- rbind(auc_results,
+                       data.frame(LV = lv,
+                                  AUC = mean(auc_fold)))
+}
+
+auc_results
+
+```
+AUC improves until LV = 3, then decreases slightly. Therefore, LV=3 is the optimal number of components.
+
+
+```{r}
+# ---------------------------------------------------------
+# UNIVARIATE ANALYSIS ON TRAINING SET (Male vs Female)
+# ---------------------------------------------------------
+
+# X_train = training metabolite matrix (samples x metabolites)
+# y_train = training class labels (Male/Female)
+
+# 1. Compute raw p-values using Welch t-test for each metabolite
+pvals <- apply(X_train, 2, function(x) t.test(x ~ y_train)$p.value)
+
+# 2. FDR correction (Benjamini-Hochberg)
+pvals_fdr <- p.adjust(pvals, method = "fdr")
+
+# 3. Compute mean fold change ( Male / Female )
+fc <- apply(X_train, 2, function(x) mean(x[y_train == "Male"]) -
+                               mean(x[y_train == "Female"]))
+
+# 4. Combine into a summary table
+uni_results <- data.frame(
+  Metabolite = colnames(X_train),
+  p_value = pvals,
+  p_FDR = pvals_fdr,
+  mean_diff = fc
+)
+
+# Sort by significance
+uni_results <- uni_results[order(uni_results$p_FDR), ]
+head(uni_results)
+
+```
+
+```{r}
+significant <- uni_results[uni_results$p_FDR < 0.05, ]
+significant
+
+```
+```{r}
+library(ggplot2)
+
+volcano <- uni_results
+volcano$logP <- -log10(volcano$p_FDR)
+
+ggplot(volcano, aes(x = mean_diff, y = logP)) +
+  geom_point(alpha = 0.7) +
+  geom_hline(yintercept = -log10(0.05), col = "red", lty = 2) +
+  theme_classic() +
+  xlab("Mean Difference (Male – Female)") +
+  ylab("-log10(FDR)") +
+  ggtitle("Volcano Plot — Univariate Analysis (Training Set)")
+
+```
+Univariate analysis performed on the training set identified 9 metabolites with significant sex-related differences after FDR correction (p_FDR < 0.05). Six metabolites (V22, V399, V84, V51, V291, V57) showed higher concentrations in females, while three metabolites (V10, V113, V250) were higher in males. The strongest discriminators were V22 and V399 (p_FDR < 0.005).
+
+
 
 -   Score plot shows a trend of separation between Male and Female
 
