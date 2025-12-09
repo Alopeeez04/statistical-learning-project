@@ -242,8 +242,11 @@ plotIndiv(pls_initial, comp = c(1,2),
 
 
 ```
+
+Internal Validation: 5-Fold CV + AUCROC
+
 ```{r}
-#Internal Validation: 5-Fold CV + AUCROC
+
 set.seed(123)
 
 folds <- createFolds(y_train, k = 5, returnTrain = TRUE)
@@ -270,25 +273,23 @@ auc_results
 AUC improves until LV = 3, then decreases slightly. Therefore, LV=3 is the optimal number of components.
 
 
+
+Univariate Analysis on Training set (Male vs Female)
+
 ```{r}
-# ---------------------------------------------------------
-# UNIVARIATE ANALYSIS ON TRAINING SET (Male vs Female)
-# ---------------------------------------------------------
 
-# X_train = training metabolite matrix (samples x metabolites)
-# y_train = training class labels (Male/Female)
 
-# 1. Compute raw p-values using Welch t-test for each metabolite
+# Compute raw p-values using Welch t-test for each metabolite
 pvals <- apply(X_train, 2, function(x) t.test(x ~ y_train)$p.value)
 
-# 2. FDR correction (Benjamini-Hochberg)
+# FDR correction (Benjamini-Hochberg)
 pvals_fdr <- p.adjust(pvals, method = "fdr")
 
-# 3. Compute mean fold change ( Male / Female )
+
 fc <- apply(X_train, 2, function(x) mean(x[y_train == "Male"]) -
                                mean(x[y_train == "Female"]))
 
-# 4. Combine into a summary table
+
 uni_results <- data.frame(
   Metabolite = colnames(X_train),
   p_value = pvals,
@@ -296,7 +297,7 @@ uni_results <- data.frame(
   mean_diff = fc
 )
 
-# Sort by significance
+
 uni_results <- uni_results[order(uni_results$p_FDR), ]
 head(uni_results)
 
