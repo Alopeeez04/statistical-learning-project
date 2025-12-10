@@ -277,6 +277,21 @@ head(sort(pvals_fdr))
 
 Several metabolites show significant sex differences (FDR \< 0.05). These will be considered as candidates for biomarker selection in the supervised modeling step.
 
+# Initials PLS-DA
+
+An initial PLS-DA model with 10 components was trained on the training set to evaluate whether the metabolomic profiles discriminate between sexes.
+
+```{r}
+#Initial PLS-DA model
+pls_initial <- plsda(X_train, y_train, ncomp = 10)
+
+plotIndiv(pls_initial, comp = c(1,2),
+          group = y_train, legend = TRUE,
+          title = "Initial PLS-DA (Training Set)")
+```
+
+The PLS-DA score plot shows a clear separation between males and females along the first two latent variables, indicating strong sex-related differences in urinary metabolomic profiles.
+
 # Internal Validation: 5-Fold CV + AUCROC
 
 A 5-fold cross-validation was used on the training set to determine the optimal number of latent variables (LVs) for the PLS-DA model, using AUC as the performance metric.
@@ -363,17 +378,70 @@ ggplot(volcano, aes(x = mean_diff, y = logP)) +
 
 Univariate analysis performed on the training set identified 9 metabolites with significant sex-related differences after FDR correction (p_FDR \< 0.05). Six metabolites (V22, V399, V84, V51, V291, V57) showed higher concentrations in females, while three metabolites (V10, V113, V250) were higher in males. The strongest discriminators were V22 and V399 (p_FDR \< 0.005).
 
-# Initials PLS-DA
-
-An initial PLS-DA model with 10 components was trained on the training set to evaluate whether the metabolomic profiles discriminate between sexes.
-
 ```{r}
-#Initial PLS-DA model
-pls_initial <- plsda(X_train, y_train, ncomp = 10)
+colnames(X_train) <- paste0("X", 1:ncol(X_train))
+colnames(X_test)  <- paste0("X", 1:ncol(X_test))
 
-plotIndiv(pls_initial, comp = c(1,2),
-          group = y_train, legend = TRUE,
-          title = "Initial PLS-DA (Training Set)")
+y_train <- as.factor(y_train)
+y_test  <- as.factor(y_test)
 ```
 
-The PLS-DA score plot shows a clear separation between males and females along the first two latent variables, indicating strong sex-related differences in urinary metabolomic profiles.
+```{r}
+set.seed(30)
+
+perf_res <- perf(pls_initial,
+                 validation = "Mfold",
+                 folds = 5,
+                 nrepeat = 5,
+                 progressBar = FALSE)
+
+plot(perf_res, sd = TRUE)
+
+```
+
+Calculate the optimal number of components, using other metrics, like BER. This shows that increasing the number of components doesnt always decrease the error.
+
+As an additional exploratory validation, the perf() method from mixOmics was applied. Although BER suggested 4 components, this criterion is less appropriate for binary classification than AUC. Therefore, AUC-based tuning remained the primary selection method.
+
+```{r}
+optimal_ncomp <- which.min(perf_res$error.rate$BER)
+optimal_ncomp
+```
+
+```{r}
+optimal_ncomp <-3
+pls_final <- plsda(X_train, y_train, ncomp = optimal_ncomp)
+
+plotIndiv(pls_final, comp = c(1,2),
+          group = y_train, legend = TRUE,
+          title = "Final PLS-DA (Training Set) — 3 components")
+```
+
+We selected n = 3 components because they maximised the AUC during cross-validation while avoiding unnecessary model complexity. Although BER suggested 4 components, the improvement was marginal and adding extra components risks overfitting, especially in a two-class dataset.
+
+```{r}
+pred_test <- predict(pls_final, X_test)
+pred_class <- pred_test$class$max.dist[, optimal_ncomp]
+
+table(True = y_test, Predicted = pred_class)
+mean(pred_class == y_test)
+```
+
+```{r}
+test_variates <- pred_test$variates
+
+test_df <- data.frame(
+  Comp1 = test_variates[,1],
+  Comp2 = if (optimal_ncomp >= 2) test_variates[,2] else rep(0, nrow(test_variates)),
+  Class = y_test
+)
+
+ggplot(test_df, aes(Comp1, Comp2, color = Class)) +
+  geom_point(size = 3) +
+  theme_minimal() +
+  ggtitle("PLS-DA Test Set Scores")
+```
+
+The final PLS-DA model does not show a visibly stronger separation because the main class structure was already captured by the first two components in the initial model. Tuning improves model stability and classification performance, but these gains occur mostly beyond component 2, which is why the 2D score plot appears similar.
+
+Next - VP scores
