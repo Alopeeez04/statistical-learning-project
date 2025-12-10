@@ -222,6 +222,10 @@ plot(variance[1:10], type="b", pch=19,
 
 -   Scree Plot indicates PC1+PC2 explain \~20–30% variance → normal for metabolomics
 
+# Split Test/Training
+
+We split the data into training and test sets (70/30) and perform univariate t-tests on the training set only. FDR correction is applied to identify metabolites significantly different between sexes.
+
 ```{r}
 set.seed(123)
 
@@ -244,6 +248,12 @@ head(sort(pvals_fdr))
 
 ```
 
+Several metabolites show significant sex differences (FDR \< 0.05). These will be considered as candidates for biomarker selection in the supervised modeling step.
+
+# Initials PLS-DA
+
+An initial PLS-DA model with 5 components was trained on the training set to evaluate whether the metabolomic profiles discriminate between sexes.
+
 ```{r}
 #Initial PLS-DA model
 pls_initial <- plsda(X_train, y_train, ncomp = 5)
@@ -253,7 +263,11 @@ plotIndiv(pls_initial, comp = c(1,2),
           title = "Initial PLS-DA (Training Set)")
 ```
 
-Internal Validation: 5-Fold CV + AUCROC
+The PLS-DA score plot shows a clear separation between males and females along the first two latent variables, indicating strong sex-related differences in urinary metabolomic profiles.
+
+# Internal Validation: 5-Fold CV + AUCROC
+
+A 5-fold cross-validation was used on the training set to determine the optimal number of latent variables (LVs) for the PLS-DA model, using AUC as the performance metric.
 
 ```{r}
 
@@ -281,9 +295,11 @@ auc_results
 
 ```
 
-AUC improves until LV = 3, then decreases slightly. Therefore, LV=3 is the optimal number of components.
+LV = 3 showed the highest mean AUC, and was therefore selected as the optimal number of components for the final PLS-DA model.
 
-Univariate Analysis on Training set (Male vs Female)
+# Univariate Analysis on Training set (Male vs Female)
+
+Univariate Welch t-tests were applied to each metabolite in the training set, followed by FDR correction. Mean differences (Male – Female) were calculated to determine the direction of change.
 
 ```{r}
 # Compute raw p-values using Welch t-test for each metabolite
@@ -306,15 +322,16 @@ uni_results <- data.frame(
 
 
 uni_results <- uni_results[order(uni_results$p_FDR), ]
-head(uni_results)
-
-```
-
-```{r}
 significant <- uni_results[uni_results$p_FDR < 0.05, ]
 significant
 
 ```
+
+Several metabolites showed significant sex differences (FDR \< 0.05). These features represent potential biomarkers and will be further evaluated in the supervised model.
+
+# Volcano Plot - Univariate Analysis
+
+A volcano plot was generated to visualize effect size (mean difference) against statistical significance (FDR-corrected p-values).
 
 ```{r}
 library(ggplot2)
@@ -333,4 +350,3 @@ ggplot(volcano, aes(x = mean_diff, y = logP)) +
 ```
 
 Univariate analysis performed on the training set identified 9 metabolites with significant sex-related differences after FDR correction (p_FDR \< 0.05). Six metabolites (V22, V399, V84, V51, V291, V57) showed higher concentrations in females, while three metabolites (V10, V113, V250) were higher in males. The strongest discriminators were V22 and V399 (p_FDR \< 0.005).
-
