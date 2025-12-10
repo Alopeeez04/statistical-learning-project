@@ -38,6 +38,22 @@ df <- read_excel("41598_2018_29592_MOESM2_ESM.xlsx", skip = 6)
 glimpse(df)
 ```
 
+```{r}
+sex_row <- as.character(raw_df[3, ])
+
+sample_names_raw <- sex_row[sex_row %in% c("Male", "Female")]
+
+sample_cols <- colnames(X)
+
+sex <- factor(sample_names_raw[1:length(sample_cols)])
+
+length(sex)
+
+table(sex)
+all(!is.na(sex))
+identical(length(sex), nrow(pca$x))
+```
+
 # Cleaning and Data Transformation
 
 ```{r}
@@ -165,22 +181,6 @@ summary(pca)
 
 -   Autoscaling (mean-center + unit variance) to make metabolites comparable
 
-```{r}
-sex_row <- as.character(raw_df[3, ])
-
-sample_names_raw <- sex_row[sex_row %in% c("Male", "Female")]
-
-sample_cols <- colnames(X)
-
-sex <- factor(sample_names_raw[1:length(sample_cols)])
-
-length(sex)
-table(sex)
-
-all(!is.na(sex))
-identical(length(sex), nrow(pca$x))
-
-```
 
 ```{r}
 pca_scores <- as.data.frame(pca$x[, 1:2])
