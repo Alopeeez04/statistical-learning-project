@@ -91,6 +91,29 @@ qqline(as.numeric(X[1,]))
 par(mfrow=c(1,1))
 ```
 
+# Histogram inspection
+
+To assess distributional properties, histogram inspection was performed. Raw metabolite intensities showed pronounced right-skewness, supporting the need for a log-transformation to improve normality and stabilize variance prior to multivariate analysis.
+
+```{r}
+feat1 <- as.numeric(X[[1]])
+feat2 <- as.numeric(X[[2]])
+
+par(mfrow = c(2,2))
+
+# Raw intensity distributions
+hist(feat1, main = "Raw Intensities - Feature 1", xlab = "", col = "lightgray")
+hist(feat2, main = "Raw Intensities - Feature 2", xlab = "", col = "lightgray")
+
+# After log10 transformation
+hist(log10(feat1 + 1), main = "Log10 - Feature 1", xlab = "", col = "lightgray")
+hist(log10(feat2 + 1), main = "Log10 - Feature 2", xlab = "", col = "lightgray")
+
+par(mfrow = c(1,1))
+```
+
+The raw intensity histograms show strong right-skewness with extreme values. After log10 transformation, the distributions become more symmetric and less heteroscedastic, supporting the use of log-transformed and autoscaled data for PCA and PLS-DA.
+
 # Non linear
 
 ```{r}
@@ -112,9 +135,13 @@ for(i in 1:nrow(X_nozero)){
 }
 ```
 
+# PCA
+
+A preliminary variance-based feature filtering step (top 20% most variable metabolites) was evaluated as an unsupervised method for noise reduction and dimensionality control. However, this procedure resulted in the removal of several metabolites previously identified as statistically significant in the univariate analysis, consequently reducing the number of biologically relevant features and weakening the discrimination between sexes in downstream multivariate models. Therefore, variance filtering was not retained in the final workflow to preserve subtle yet meaningful metabolic differences.
+
 The matrix was transposed so that samples correspond to rows and metabolites to columns, which is the correct structure required for multivariate analyses such as PCA and PLS-DA, where each row must represent an independent observation:
 
--   With X_scaled \<- scale(t(X_log)).
+-   With \<- scale(t(X_log)).
 
 ```{r}
 # Log10 transformation
@@ -191,6 +218,8 @@ Outliers reflect **real biological variability** within the healthy population.\
 Removing them could introduce **bias**, especially if outliers are unevenly distributed between sexes.\
 Furthermore, the original study **did not exclude any samples** all **120 subjects** were analyzed in full.
 
+# PCA after log transformation
+
 ```{r}
 score_df <- data.frame(
   PC1 = pca$x[,1],
@@ -244,26 +273,9 @@ pvals <- apply(X_train, 2, function(x) t.test(x ~ y_train)$p.value)
 pvals_fdr <- p.adjust(pvals, method = "fdr")
 
 head(sort(pvals_fdr))
-
-
 ```
 
 Several metabolites show significant sex differences (FDR \< 0.05). These will be considered as candidates for biomarker selection in the supervised modeling step.
-
-# Initials PLS-DA
-
-An initial PLS-DA model with 5 components was trained on the training set to evaluate whether the metabolomic profiles discriminate between sexes.
-
-```{r}
-#Initial PLS-DA model
-pls_initial <- plsda(X_train, y_train, ncomp = 5)
-
-plotIndiv(pls_initial, comp = c(1,2),
-          group = y_train, legend = TRUE,
-          title = "Initial PLS-DA (Training Set)")
-```
-
-The PLS-DA score plot shows a clear separation between males and females along the first two latent variables, indicating strong sex-related differences in urinary metabolomic profiles.
 
 # Internal Validation: 5-Fold CV + AUCROC
 
@@ -350,3 +362,18 @@ ggplot(volcano, aes(x = mean_diff, y = logP)) +
 ```
 
 Univariate analysis performed on the training set identified 9 metabolites with significant sex-related differences after FDR correction (p_FDR \< 0.05). Six metabolites (V22, V399, V84, V51, V291, V57) showed higher concentrations in females, while three metabolites (V10, V113, V250) were higher in males. The strongest discriminators were V22 and V399 (p_FDR \< 0.005).
+
+# Initials PLS-DA
+
+An initial PLS-DA model with 10 components was trained on the training set to evaluate whether the metabolomic profiles discriminate between sexes.
+
+```{r}
+#Initial PLS-DA model
+pls_initial <- plsda(X_train, y_train, ncomp = 10)
+
+plotIndiv(pls_initial, comp = c(1,2),
+          group = y_train, legend = TRUE,
+          title = "Initial PLS-DA (Training Set)")
+```
+
+The PLS-DA score plot shows a clear separation between males and females along the first two latent variables, indicating strong sex-related differences in urinary metabolomic profiles.
