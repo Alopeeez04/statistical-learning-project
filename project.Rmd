@@ -5,6 +5,9 @@ date: "2025-11-25"
 output: html_document
 ---
 
+The dataset used in this project corresponds to the supplementary file **MOESM2 (ESM)** from the publication by Fan et al. (2018). It contains the raw GC-TOF-MS metabolomics data for 120 urine samples\
+from healthy adults (60 males and 60 females), enabling independent preprocessing, exploratory analysis, feature selection, and classification.
+
 # Import Library
 
 ```{r}
@@ -182,6 +185,11 @@ outliers <- which(distances > cutoff)
 print(paste("Outliers detected:", length(outliers)))
 ```
 
+We detected 9 outliers, but they weren't removed because:
+
+Outliers reflect **real biological variability** within the healthy population.\
+Removing them could introduce **bias**, especially if outliers are unevenly distributed between sexes.\
+Furthermore, the original study **did not exclude any samples** all **120 subjects** were analyzed in full.
 
 ```{r}
 score_df <- data.frame(
@@ -207,6 +215,13 @@ plot(variance[1:10], type="b", pch=19,
      main="Scree Plot - PCA")
 
 ```
+
+-   Score plot shows a trend of separation between Male and Female
+
+-   Some possible outliers appear (next step: detection)
+
+-   Scree Plot indicates PC1+PC2 explain \~20–30% variance → normal for metabolomics
+
 ```{r}
 set.seed(123)
 
@@ -229,7 +244,6 @@ head(sort(pvals_fdr))
 
 ```
 
-
 ```{r}
 #Initial PLS-DA model
 pls_initial <- plsda(X_train, y_train, ncomp = 5)
@@ -237,10 +251,6 @@ pls_initial <- plsda(X_train, y_train, ncomp = 5)
 plotIndiv(pls_initial, comp = c(1,2),
           group = y_train, legend = TRUE,
           title = "Initial PLS-DA (Training Set)")
-
-
-
-
 ```
 
 Internal Validation: 5-Fold CV + AUCROC
@@ -270,15 +280,12 @@ for (lv in 1:5) {
 auc_results
 
 ```
+
 AUC improves until LV = 3, then decreases slightly. Therefore, LV=3 is the optimal number of components.
-
-
 
 Univariate Analysis on Training set (Male vs Female)
 
 ```{r}
-
-
 # Compute raw p-values using Welch t-test for each metabolite
 pvals <- apply(X_train, 2, function(x) t.test(x ~ y_train)$p.value)
 
@@ -308,6 +315,7 @@ significant <- uni_results[uni_results$p_FDR < 0.05, ]
 significant
 
 ```
+
 ```{r}
 library(ggplot2)
 
@@ -323,12 +331,6 @@ ggplot(volcano, aes(x = mean_diff, y = logP)) +
   ggtitle("Volcano Plot — Univariate Analysis (Training Set)")
 
 ```
-Univariate analysis performed on the training set identified 9 metabolites with significant sex-related differences after FDR correction (p_FDR < 0.05). Six metabolites (V22, V399, V84, V51, V291, V57) showed higher concentrations in females, while three metabolites (V10, V113, V250) were higher in males. The strongest discriminators were V22 and V399 (p_FDR < 0.005).
 
+Univariate analysis performed on the training set identified 9 metabolites with significant sex-related differences after FDR correction (p_FDR \< 0.05). Six metabolites (V22, V399, V84, V51, V291, V57) showed higher concentrations in females, while three metabolites (V10, V113, V250) were higher in males. The strongest discriminators were V22 and V399 (p_FDR \< 0.005).
 
-
--   Score plot shows a trend of separation between Male and Female
-
--   Some possible outliers appear (next step: detection)
-
--   Scree Plot indicates PC1+PC2 explain \~20–30% variance → normal for metabolomics
