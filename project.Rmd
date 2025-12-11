@@ -30,8 +30,8 @@ raw_df <- read_excel("41598_2018_29592_MOESM2_ESM.xlsx")
 ```
 
 ```{r}
-sex <- unlist(raw_df[3, -1])
-sex <- as.factor(sex)
+sex_labels <- unlist(raw_df[3, 17:136])
+sex <- as.factor(sex_labels)
 
 df <- read_excel("41598_2018_29592_MOESM2_ESM.xlsx", skip = 6)
 
@@ -39,6 +39,7 @@ glimpse(df)
 ```
 
 ```{r}
+# júlia: i'm not sure what this chunk is for because X and pca are not defined before any it uses the raw df
 sex_row <- as.character(raw_df[3, ])
 
 sample_names_raw <- sex_row[sex_row %in% c("Male", "Female")]
@@ -112,8 +113,8 @@ par(mfrow=c(1,1))
 To assess distributional properties, histogram inspection was performed. Raw metabolite intensities showed pronounced right-skewness, supporting the need for a log-transformation to improve normality and stabilize variance prior to multivariate analysis.
 
 ```{r}
-feat1 <- as.numeric(X[[1]])
-feat2 <- as.numeric(X[[2]])
+feat1 <- as.numeric(X[[1]]) #S1
+feat2 <- as.numeric(X[[2]]) #S2
 
 par(mfrow = c(2,2))
 
@@ -172,9 +173,9 @@ summary(pca)
 
 ```
 
--   Summary statistics show very different scales and non-normal distributions
+-   Summary statistics show very different scales and non-normal distributions
 
--   A few zero values detected → replaced with half of minimum value\
+-   A few zero values detected → replaced with half of minimum value\
     → required for log10 transformation
 
 -   Applied log10(x) to reduce skewness and stabilize variance
@@ -399,7 +400,7 @@ plot(perf_res, sd = TRUE)
 
 ```
 
-Calculate the optimal number of components, using other metrics, like BER. This shows that increasing the number of components doesnt always decrease the error.
+Calculate the optimal number of components, using other metrics, like BER. This shows that increasing the number of components doesn't always decrease the error.
 
 As an additional exploratory validation, the perf() method from mixOmics was applied. Although BER suggested 4 components, this criterion is less appropriate for binary classification than AUC. Therefore, AUC-based tuning remained the primary selection method.
 
@@ -444,4 +445,205 @@ ggplot(test_df, aes(Comp1, Comp2, color = Class)) +
 
 The final PLS-DA model does not show a visibly stronger separation because the main class structure was already captured by the first two components in the initial model. Tuning improves model stability and classification performance, but these gains occur mostly beyond component 2, which is why the 2D score plot appears similar.
 
-Next - VP scores
+# Feature Selection: Calculate and Rank VIP Scores
+
+# Calculate and Rank VIP Scores
+```{r vip_ranking}
+# 1. Extract the VIP scores matrix from the final PLS-DA model
+# We typically focus on the scores from the first component (LV1)
+vip_matrix <- vip(pls_final)
+vip_scores_lv1 <- vip_matrix[, 1] 
+
+# 2. Order the metabolites from most important to least important
+vip_ranked <- sort(vip_scores_lv1, decreasing = TRUE)
+
+# 3. Convert to a data frame for plotting and analysis
+vip_df <- data.frame(
+  Metabolite = names(vip_ranked),
+  VIP = vip_ranked
+)
+
+# 4. Visualize the top 20 most important metabolites
+top_n <- 20
+vip_top <- head(vip_df, top_n)
+
+# Generate the bar plot
+library(ggplot2)
+ggplot(vip_top, aes(x = reorder(Metabolite, VIP), y = VIP)) +
+  geom_bar(stat = "identity", fill = "light blue") + 
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red", size = 0.8) +
+  coord_flip() + 
+  theme_minimal(base_size = 14) +
+  labs(title = paste("Top", top_n, "Metabolites by VIP Score (LV1)"),
+       y = "VIP Score",
+       x = "Metabolite")
+```
+
+# Implement Recursive Feature Elimination (RFE) using the k-NN Classifier
+
+júlia -> no he pogut fer que funcioni, tot i aixi he fet el següent pas (NO HO EXECUTEU)
+
+```{r rfe_knn_execution}
+# 1. Define the control parameters for RFE
+# We use 5-fold Cross-Validation (CV) repeated 5 times, as often done in RFE.
+rfe_control <- rfeControl(
+  functions = caretFuncs, # Use standard caret functions (for k-NN)
+  method = "repeatedcv",
+  number = 5,
+  repeats = 5,
+  verbose = FALSE # Set to TRUE for detailed output during execution
+)
+
+# 2. Define the sizes of the feature subsets to evaluate (The 'keepX' equivalent)
+# This tests subset sizes from 2 to 50 features.
+subset_sizes <- c(2, 5, 10, 15, 20, 25, 30, 40, 50) 
+
+# 3. Create a feature ranking function based on PLS-DA VIP scores
+# This function is crucial: RFE uses this to decide which features to eliminate.
+# We are overriding the default ranking (which is usually a t-test or linear model)
+# to use the more informed VIP scores from our PLS-DA analysis.
+
+# We must first ensure 'vip_ranked' from the previous step is available:
+if (!exists("vip_ranked")) {
+  stop("Error: 'vip_ranked' is missing. Please run the VIP ranking code block first.")
+}
+
+# Now, define the custom RFE functions using the VIP ranking
+vip_rfe_func <- caretFuncs
+vip_rfe_func$selectSize <- pickSizeBest
+vip_rfe_func$rank <- function(X, y) {
+  # This function just returns the names of the features in the order of the pre-calculated VIP ranking.
+  # It ensures RFE eliminates features based on VIP and not on a default method.
+  
+  # Ensure the ranking only includes features actually present in X
+  current_features <- names(X)
+  vip_subset <- vip_ranked[names(vip_ranked) %in% current_features]
+  
+  # Return the names, which RFE will use to eliminate features sequentially
+  return(names(vip_subset))
+}
+
+# 4. Execute the RFE
+# We use k-NN as the classifier, matching the lab guide.
+rfe_results <- rfe(x = X_train,
+                   y = y_train,
+                   sizes = subset_sizes,
+                   rfeControl = rfe_control,
+                   method = "knn",
+                   tuneLength = 5, # Test 5 different 'k' values for k-NN
+                   metric = "Accuracy", # Use Accuracy as the metric to choose the best model
+                   preProcess = c("center", "scale"), # Standardize data within CV folds
+                   functions = vip_rfe_func) # Use our custom VIP-based ranking
+
+# 5. Extract the optimal number of features
+optimal.nfeatures.rfe <- rfe_results$bestSubset
+
+cat("Optimal number of features found by RFE:", optimal.nfeatures.rfe, "\n")
+cat("Top 10 selected features:", head(rfe_results$optVariables, 10), "\n")
+
+# Optional: Plot the RFE results
+plot(rfe_results, type = c("g", "o"), main = "RFE Performance Curve (k-NN, VIP-Ranked)")
+
+# 6. Save the list of optimal features
+optimal_features_rfe <- rfe_results$optVariables
+
+# Ensure the final model uses the correct training data (only optimal features)
+X_train_optimal <- X_train[, optimal_features_rfe]
+```
+
+
+# Final Model Training and Evaluation with Optimal Features
+```{r}
+# 1. Define the number of components (LVs)
+# For simplicity, we use the previously optimized ncomp = 3.
+optimal_ncomp <- 3 
+
+# 2. Train the final PLS-DA model using ONLY the optimal features
+# We use the full original training data, but only the selected columns.
+pls_final_optimal <- plsda(X_train_optimal, y_train, ncomp = optimal_ncomp)
+
+cat("Final PLS-DA model trained with:", optimal_nfeatures.rfe, "metabolites.\n")
+
+# 3. Prepare the Test Data
+# IMPORTANT: The test set (X_test) must be filtered to include only the optimal features.
+# Use the list of features obtained from RFE (optimal_features_rfe)
+X_test_optimal <- X_test[, optimal_features_rfe]
+
+# 4. Predict on the Test Set
+pred_test_optimal <- predict(pls_final_optimal, X_test_optimal)
+
+# Extract the predicted class using the max distance for the optimal ncomp
+pred_class_optimal <- pred_test_optimal$class$max.dist[, optimal_ncomp]
+
+# 5. Evaluate Performance
+cat("\n--- Performance on Test Set ---\n")
+
+# Confusion Matrix
+confusion_matrix_optimal <- table(True = y_test, Predicted = pred_class_optimal)
+print(confusion_matrix_optimal)
+
+# Overall Accuracy
+accuracy_optimal <- mean(pred_class_optimal == y_test)
+cat("\nOverall Accuracy:", round(accuracy_optimal, 4), "\n")
+
+# Balanced Error Rate (BER) - Better for two-class problems
+ber_optimal <- BER(confusion_matrix_optimal)
+cat("Balanced Error Rate (BER):", round(ber_optimal, 4), "\n")
+```
+
+# Visualization of Test Set Scores
+```{r plot_optimal_test}
+# Extract the sample scores (variates) for the optimal model
+test_variates_optimal <- pred_test_optimal$variates
+
+# Create a data frame for plotting
+test_df_optimal <- data.frame(
+  Comp1 = test_variates_optimal[,1],
+  Comp2 = if (optimal_ncomp >= 2) test_variates_optimal[,2] else rep(0, nrow(test_variates_optimal)),
+  Class = y_test
+)
+
+# Generate the Score Plot
+ggplot(test_df_optimal, aes(Comp1, Comp2, color = Class)) +
+  geom_point(size = 3) +
+  theme_minimal(base_size = 14) +
+  scale_color_manual(values = c("Female" = "red", "Male" = "blue")) +
+  ggtitle(paste("Final PLS-DA Test Set Scores (Features:", optimal_nfeatures.rfe, ")")) +
+  labs(x = "Component 1", y = "Component 2")
+```
+
+Did the accuracy (accuracy_optimal) improved in relation to the original PLS-DA model that used all 407 metabolites?
+- 
+
+next step - Validate the results in external validation
+
+```{r}
+
+
+```
+
+```{r}
+
+
+```
+
+```{r}
+
+
+```
+
+```{r}
+
+
+```
+
+```{r}
+
+
+```
+
+```{r}
+
+
+```
+
