@@ -11,16 +11,31 @@ from healthy adults (60 males and 60 females), enabling independent preprocessin
 # Import Library
 
 ```{r}
+# -------------------------------
+# Libraries
+# -------------------------------
+
+# Data import and manipulation
 library(readxl)
+library(dplyr)
 library(tidyverse)
+
+# Visualization
 library(ggplot2)
 library(ellipse)
+library(knitr)
+
+# Multivariate analysis
+library(pls)
+library(mixOmics)
+
+# Machine learning and validation
 library(caret)
 library(pROC)
-library(pls)
+
+# Statistics and utilities
 library(DescTools)
-library(dplyr)
-library(mixOmics)
+
 ```
 
 # Import dataset
@@ -38,44 +53,30 @@ df <- read_excel("41598_2018_29592_MOESM2_ESM.xlsx", skip = 6)
 glimpse(df)
 ```
 
-```{r}
-# júlia: i'm not sure what this chunk is for because X and pca are not defined before any it uses the raw df
-sex_row <- as.character(raw_df[3, ])
-
-sample_names_raw <- sex_row[sex_row %in% c("Male", "Female")]
-
-sample_cols <- colnames(X)
-
-sex <- factor(sample_names_raw[1:length(sample_cols)])
-
-length(sex)
-
-table(sex)
-all(!is.na(sex))
-identical(length(sex), nrow(pca$x))
-```
-
 # Cleaning and Data Transformation
 
 ```{r}
 # organize names
 # first df line has de colnames
-colnames(df) <- df[1, ]
+colnames(df) <- as.character(unlist(df[1, ]))
+df <- df[-1, , drop = FALSE]
 
-df <- df[-1, ]
+# Convert measurement columns (17:end) to numeric explicitly
+measure_cols <- 17:ncol(df)
 
-# convert to numeric
-for (i in 17:ncol(df)) {  # first 16 columns = metadata
+for (i in measure_cols) {
   df[[i]] <- as.numeric(df[[i]])
 }
 
-X <- df[, 17:ncol(df)] 
 
-Y <- sex
+X <- as.data.frame(df[, measure_cols])
 
 colnames(X) <- paste0("S", seq_len(ncol(X)))
-
 # number of metabolites and samples
+if ("Metabolite" %in% colnames(df)) {
+  rownames(X) <- df$Metabolite
+}
+
 dim(X)
 
 ```
@@ -182,6 +183,20 @@ summary(pca)
 
 -   Autoscaling (mean-center + unit variance) to make metabolites comparable
 
+```{r}
+# Sanity check: do sex labels align with PCA samples?
+sex_row <- as.character(raw_df[3, ])
+sample_names_raw <- sex_row[sex_row %in% c("Male", "Female")]
+sample_cols <- colnames(X)
+
+sex <- factor(sample_names_raw[1:length(sample_cols)])
+
+length(sex)
+table(sex)
+all(!is.na(sex))
+identical(length(sex), nrow(pca$x))
+
+```
 
 ```{r}
 pca_scores <- as.data.frame(pca$x[, 1:2])
@@ -362,8 +377,6 @@ Several metabolites showed significant sex differences (FDR \< 0.05). These feat
 A volcano plot was generated to visualize effect size (mean difference) against statistical significance (FDR-corrected p-values).
 
 ```{r}
-library(ggplot2)
-
 volcano <- uni_results
 volcano$logP <- -log10(volcano$p_FDR)
 
@@ -468,7 +481,6 @@ top_n <- 20
 vip_top <- head(vip_df, top_n)
 
 # Generate the bar plot
-library(ggplot2)
 ggplot(vip_top, aes(x = reorder(Metabolite, VIP), y = VIP)) +
   geom_bar(stat = "identity", fill = "light blue") + 
   geom_hline(yintercept = 1, linetype = "dashed", color = "red", size = 0.8) +
@@ -481,98 +493,86 @@ ggplot(vip_top, aes(x = reorder(Metabolite, VIP), y = VIP)) +
 
 # Implement Recursive Feature Elimination (RFE) using the k-NN Classifier
 
-júlia -> no he pogut fer que funcioni, tot i aixi he fet el següent pas (NO HO EXECUTEU)
-
 ```{r rfe_knn_execution}
-# 1. Define the control parameters for RFE
-# We use 5-fold Cross-Validation (CV) repeated 5 times, as often done in RFE.
+set.seed(123)
+
+# Define subset sizes for RFE
+subset_sizes <- c(2, 5, 10, 15, 20, 25, 30, 40, 50)
+
+# RFE control with default caret functions
 rfe_control <- rfeControl(
-  functions = caretFuncs, # Use standard caret functions (for k-NN)
+  functions = caretFuncs,   # default ranking
   method = "repeatedcv",
   number = 5,
   repeats = 5,
-  verbose = FALSE # Set to TRUE for detailed output during execution
+  verbose = TRUE,          # suppress intermediate output
+  returnResamp = "all"
 )
 
-# 2. Define the sizes of the feature subsets to evaluate (The 'keepX' equivalent)
-# This tests subset sizes from 2 to 50 features.
-subset_sizes <- c(2, 5, 10, 15, 20, 25, 30, 40, 50) 
+# Execute RFE
+rfe_results <- rfe(
+  x = X_train,
+  y = y_train,
+  sizes = subset_sizes,
+  rfeControl = rfe_control,
+  method = "knn",
+  tuneLength = 5,
+  metric = "Accuracy",
+  preProcess = c("center","scale")
+)
 
-# 3. Create a feature ranking function based on PLS-DA VIP scores
-# This function is crucial: RFE uses this to decide which features to eliminate.
-# We are overriding the default ranking (which is usually a t-test or linear model)
-# to use the more informed VIP scores from our PLS-DA analysis.
-
-# We must first ensure 'vip_ranked' from the previous step is available:
-if (!exists("vip_ranked")) {
-  stop("Error: 'vip_ranked' is missing. Please run the VIP ranking code block first.")
-}
-
-# Now, define the custom RFE functions using the VIP ranking
-vip_rfe_func <- caretFuncs
-vip_rfe_func$selectSize <- pickSizeBest
-vip_rfe_func$rank <- function(X, y) {
-  # This function just returns the names of the features in the order of the pre-calculated VIP ranking.
-  # It ensures RFE eliminates features based on VIP and not on a default method.
-  
-  # Ensure the ranking only includes features actually present in X
-  current_features <- names(X)
-  vip_subset <- vip_ranked[names(vip_ranked) %in% current_features]
-  
-  # Return the names, which RFE will use to eliminate features sequentially
-  return(names(vip_subset))
-}
-
-# 4. Execute the RFE
-# We use k-NN as the classifier, matching the lab guide.
-rfe_results <- rfe(x = X_train,
-                   y = y_train,
-                   sizes = subset_sizes,
-                   rfeControl = rfe_control,
-                   method = "knn",
-                   tuneLength = 5, # Test 5 different 'k' values for k-NN
-                   metric = "Accuracy", # Use Accuracy as the metric to choose the best model
-                   preProcess = c("center", "scale"), # Standardize data within CV folds
-                   functions = vip_rfe_func) # Use our custom VIP-based ranking
-
-# 5. Extract the optimal number of features
+# Extract optimal features
 optimal.nfeatures.rfe <- rfe_results$bestSubset
-
-cat("Optimal number of features found by RFE:", optimal.nfeatures.rfe, "\n")
-cat("Top 10 selected features:", head(rfe_results$optVariables, 10), "\n")
-
-# Optional: Plot the RFE results
-plot(rfe_results, type = c("g", "o"), main = "RFE Performance Curve (k-NN, VIP-Ranked)")
-
-# 6. Save the list of optimal features
 optimal_features_rfe <- rfe_results$optVariables
 
-# Ensure the final model uses the correct training data (only optimal features)
-X_train_optimal <- X_train[, optimal_features_rfe]
+cat("Optimal number of features:", optimal.nfeatures.rfe, "\n")
+cat("Top selected features:", head(optimal_features_rfe, 10), "\n")
+```
+
+# Plot the results of the RFE function and print the table
+```{r}
+# Extract resampling results from RFE
+rfe_df <- rfe_results$results  
+
+# Plot accuracy vs. number of variables
+ggplot(rfe_df, aes(x = Variables, y = Accuracy)) +
+  geom_line(color = "steelblue", size = 1.2) +
+  geom_point(size = 3, color = "steelblue") +
+  geom_point(data = subset(rfe_df, Variables == rfe_results$bestSubset),
+             aes(x = Variables, y = Accuracy),
+             color = "red", size = 4, shape = 21, fill = "red") +
+  theme_minimal(base_size = 14) +
+  labs(title = "RFE Accuracy vs. Number of Features",
+       x = "Number of Features",
+       y = "Accuracy (Repeated CV)")
+
+# Print the table with the results to validate the plot representation
+kable(round(rfe_df, 3), caption = "RFE Accuracy by Number of Features")
+
+
+
 ```
 
 
 # Final Model Training and Evaluation with Optimal Features
 ```{r}
 # 1. Define the number of components (LVs)
-# For simplicity, we use the previously optimized ncomp = 3.
+# Use the previously optimized ncomp = 3.
 optimal_ncomp <- 3 
 
-# 2. Train the final PLS-DA model using ONLY the optimal features
-# We use the full original training data, but only the selected columns.
+# 2. Subset the training and test data to only the optimal features
+X_train_optimal <- X_train[, optimal_features_rfe]
+X_test_optimal  <- X_test[, optimal_features_rfe]
+
+# 3. Train the final PLS-DA model using ONLY the optimal features
 pls_final_optimal <- plsda(X_train_optimal, y_train, ncomp = optimal_ncomp)
 
-cat("Final PLS-DA model trained with:", optimal_nfeatures.rfe, "metabolites.\n")
-
-# 3. Prepare the Test Data
-# IMPORTANT: The test set (X_test) must be filtered to include only the optimal features.
-# Use the list of features obtained from RFE (optimal_features_rfe)
-X_test_optimal <- X_test[, optimal_features_rfe]
+cat("Final PLS-DA model trained with:", optimal.nfeatures.rfe, "metabolites.\n")
 
 # 4. Predict on the Test Set
 pred_test_optimal <- predict(pls_final_optimal, X_test_optimal)
 
-# Extract the predicted class using the max distance for the optimal ncomp
+# Extract predicted class using max distance for the chosen ncomp
 pred_class_optimal <- pred_test_optimal$class$max.dist[, optimal_ncomp]
 
 # 5. Evaluate Performance
@@ -586,13 +586,31 @@ print(confusion_matrix_optimal)
 accuracy_optimal <- mean(pred_class_optimal == y_test)
 cat("\nOverall Accuracy:", round(accuracy_optimal, 4), "\n")
 
-# Balanced Error Rate (BER) - Better for two-class problems
+# Custom BER function (can't be exported directly)
+BER <- function(conf_matrix) {
+  # Convert to matrix
+  cm <- as.matrix(conf_matrix)
+  
+  # Assume binary classification: rows = true, cols = predicted
+  # Sensitivity for class 1
+  sens1 <- cm[1,1] / sum(cm[1,])
+  # Sensitivity for class 2
+  sens2 <- cm[2,2] / sum(cm[2,])
+  
+  # BER = 1 - mean(sensitivities)
+  ber <- 1 - mean(c(sens1, sens2))
+  return(ber)
+}
+
 ber_optimal <- BER(confusion_matrix_optimal)
 cat("Balanced Error Rate (BER):", round(ber_optimal, 4), "\n")
+
+
 ```
 
 # Visualization of Test Set Scores
 ```{r plot_optimal_test}
+# Visualization of Test Set Scores
 # Extract the sample scores (variates) for the optimal model
 test_variates_optimal <- pred_test_optimal$variates
 
@@ -608,21 +626,210 @@ ggplot(test_df_optimal, aes(Comp1, Comp2, color = Class)) +
   geom_point(size = 3) +
   theme_minimal(base_size = 14) +
   scale_color_manual(values = c("Female" = "red", "Male" = "blue")) +
-  ggtitle(paste("Final PLS-DA Test Set Scores (Features:", optimal_nfeatures.rfe, ")")) +
+  ggtitle(paste("Final PLS-DA Test Set Scores (Features:", optimal.nfeatures.rfe, ")")) +
   labs(x = "Component 1", y = "Component 2")
-```
-
-Did the accuracy (accuracy_optimal) improved in relation to the original PLS-DA model that used all 407 metabolites?
-- 
-
-next step - Validate the results in external validation
-
-```{r}
-
 
 ```
 
+# External validation of the results
+
 ```{r}
+# --- External Validation on Test Set with Optimal Features ---
+
+# Ensure test and train sets have the same features
+X_test_optimal <- X_test[, optimal_features_rfe]
+
+# Predict with the final PLS-DA model trained on optimal features
+pred_test_optimal <- predict(pls_final_optimal, X_test_optimal)
+
+# Extract predicted classes using max distance
+pred_class_optimal <- pred_test_optimal$class$max.dist[, optimal_ncomp]
+
+# Confusion Matrix
+conf_matrix <- table(True = y_test, Predicted = pred_class_optimal)
+cat("Confusion Matrix:\n")
+print(conf_matrix)
+
+# Overall Accuracy
+accuracy <- mean(pred_class_optimal == y_test)
+cat("\nOverall Accuracy:", round(accuracy, 4), "\n")
+
+# Balanced Error Rate (BER)
+BER <- function(cm) {
+  cm <- as.matrix(cm)
+  sens <- diag(cm) / rowSums(cm)
+  1 - mean(sens)
+}
+ber <- BER(conf_matrix)
+cat("Balanced Error Rate (BER):", round(ber, 4), "\n")
+
+# ROC & AUC for binary classification
+y_test_num <- as.numeric(y_test) - 1
+pred_scores <- pred_test_optimal$predict[,1,optimal_ncomp]
+
+roc_obj <- roc(y_test_num, pred_scores)
+auc_val <- auc(roc_obj)
+cat("AUC:", round(auc_val, 4), "\n")
+
+# --- Bootstrap Confidence Intervals ---
+set.seed(123)
+n_boot <- 1000
+boot_acc <- numeric(n_boot)
+boot_auc <- numeric(n_boot)
+
+for (i in 1:n_boot) {
+  idx <- sample(seq_along(y_test), replace = TRUE)
+  Xb <- X_test_optimal[idx, ]
+  yb <- y_test[idx]
+  
+  pred_b <- predict(pls_final_optimal, Xb)
+  class_b <- pred_b$class$max.dist[, optimal_ncomp]
+  boot_acc[i] <- mean(class_b == yb)
+  
+  scores_b <- pred_b$predict[,1,optimal_ncomp]
+  yb_num <- as.numeric(yb) - 1
+  
+  if (length(unique(yb_num)) == 2) {
+    roc_b <- roc(yb_num, scores_b, quiet = TRUE)
+    boot_auc[i] <- auc(roc_b)
+  } else {
+    boot_auc[i] <- NA
+  }
+}
+
+# Report mean and 95% CI
+acc_ci <- quantile(boot_acc, probs = c(0.025, 0.975))
+auc_ci <- quantile(boot_auc, probs = c(0.025, 0.975), na.rm = TRUE)
+
+cat("\n--- Bootstrap Confidence Intervals (n =", n_boot, ") ---\n")
+cat("Accuracy: Mean =", round(mean(boot_acc), 4),
+    " | 95% CI =", round(acc_ci[1], 4), "-", round(acc_ci[2], 4), "\n")
+cat("AUCROC:  Mean =", round(mean(boot_auc, na.rm = TRUE), 4),
+    " | 95% CI =", round(auc_ci[1], 4), "-", round(auc_ci[2], 4), "\n")
+
+```
+
+```{r}
+# --- Figure of Merit Uncertainty (Bootstrap 95% CI) ---
+
+# Point estimates on the held-out test set
+conf_matrix <- table(True = y_test, Predicted = pred_class_optimal)
+
+# Helper metrics (binary, rows=True: Female, Male; cols=Predicted)
+metrics_point <- (function(cm) {
+  cm <- as.matrix(cm)
+  TP1 <- cm[1,1]; FN1 <- cm[1,2]; FP1 <- cm[2,1]; TN1 <- cm[2,2]
+  acc <- (TP1 + TN1) / sum(cm)
+  sens_fem <- TP1 / (TP1 + FN1)
+  spec_fem <- TN1 / (TN1 + FP1)
+  sens_male <- TN1 / (TN1 + FP1)        # sensitivity for "Male" if treating Male as positive in its own class
+  spec_male <- TP1 / (TP1 + FN1)
+  ber <- 1 - mean(c(sens_fem, sens_male))
+  po <- acc
+  pe <- ((sum(cm[1,]) * sum(cm[,1])) + (sum(cm[2,]) * sum(cm[,2]))) / (sum(cm)^2)
+  kappa <- (po - pe) / (1 - pe)
+  list(accuracy = acc, BER = ber,
+       sensitivity_female = sens_fem, specificity_female = spec_fem,
+       sensitivity_male = sens_male, specificity_male = spec_male,
+       kappa = kappa)
+})(conf_matrix)
+
+# AUC point estimate (scores from your model)
+y_test_num <- as.numeric(y_test) - 1
+pred_scores <- pred_test_optimal$predict[,1,optimal_ncomp]
+auc_point <- as.numeric(auc(roc(y_test_num, pred_scores)))
+
+cat("\n--- Point estimates (Test Set) ---\n")
+cat(sprintf("Accuracy = %.4f\n", metrics_point$accuracy))
+cat(sprintf("BER      = %.4f\n", metrics_point$BER))
+cat(sprintf("Kappa    = %.4f\n", metrics_point$kappa))
+cat(sprintf("Sens(F)  = %.4f | Spec(F) = %.4f\n", metrics_point$sensitivity_female, metrics_point$specificity_female))
+cat(sprintf("Sens(M)  = %.4f | Spec(M) = %.4f\n", metrics_point$sensitivity_male, metrics_point$specificity_male))
+cat(sprintf("AUCROC   = %.4f\n", auc_point))
+
+# --- Bootstrap CIs for Accuracy, BER, Kappa, Sens/Spec (both classes), and AUC ---
+set.seed(123)
+n_boot <- 1000
+
+boot_acc  <- numeric(n_boot)
+boot_ber  <- numeric(n_boot)
+boot_kappa<- numeric(n_boot)
+boot_sensF<- numeric(n_boot)
+boot_specF<- numeric(n_boot)
+boot_sensM<- numeric(n_boot)
+boot_specM<- numeric(n_boot)
+boot_auc  <- numeric(n_boot)
+
+for (i in 1:n_boot) {
+  idx <- sample(seq_along(y_test), replace = TRUE)
+  Xb <- X_test_optimal[idx, ]
+  yb <- y_test[idx]
+
+  pred_b <- predict(pls_final_optimal, Xb)
+  class_b <- pred_b$class$max.dist[, optimal_ncomp]
+  cm <- table(True = yb, Predicted = class_b)
+
+  # Guard: ensure 2x2 matrix even if a class is missing
+  all_lvls <- levels(y_test)
+  cm <- as.matrix(cm)
+  # Rebuild complete 2x2 in fixed order (Female, Male)
+  full_cm <- matrix(0, nrow = 2, ncol = 2,
+                    dimnames = list(True = all_lvls, Predicted = all_lvls))
+  for (tr in rownames(cm)) for (pr in colnames(cm)) full_cm[tr, pr] <- cm[tr, pr]
+  cm <- full_cm
+
+  TP1 <- cm["Female","Female"]; FN1 <- cm["Female","Male"]
+  FP1 <- cm["Male","Female"];   TN1 <- cm["Male","Male"]
+
+  acc <- (TP1 + TN1) / sum(cm)
+  sensF <- if ((TP1 + FN1) > 0) TP1 / (TP1 + FN1) else NA
+  specF <- if ((TN1 + FP1) > 0) TN1 / (TN1 + FP1) else NA
+  sensM <- if ((TN1 + FP1) > 0) TN1 / (TN1 + FP1) else NA
+  specM <- if ((TP1 + FN1) > 0) TP1 / (TP1 + FN1) else NA
+  ber   <- 1 - mean(c(sensF, sensM), na.rm = TRUE)
+
+  po <- acc
+  pe <- ((sum(cm["Female",]) * sum(cm[,"Female"])) + (sum(cm["Male",]) * sum(cm[,"Male"]))) / (sum(cm)^2)
+  kappa <- if ((1 - pe) > 0) (po - pe) / (1 - pe) else NA
+
+  # AUC from scores (skip if a single class)
+  scores_b <- pred_b$predict[,1,optimal_ncomp]
+  yb_num <- as.numeric(yb) - 1
+  if (length(unique(yb_num)) == 2) {
+    boot_auc[i] <- as.numeric(auc(roc(yb_num, scores_b, quiet = TRUE)))
+  } else {
+    boot_auc[i] <- NA
+  }
+
+  boot_acc[i]   <- acc
+  boot_ber[i]   <- ber
+  boot_kappa[i] <- kappa
+  boot_sensF[i] <- sensF
+  boot_specF[i] <- specF
+  boot_sensM[i] <- sensM
+  boot_specM[i] <- specM
+}
+
+q <- function(x) quantile(x, probs = c(0.025, 0.975), na.rm = TRUE)
+
+acc_ci   <- q(boot_acc)
+ber_ci   <- q(boot_ber)
+kappa_ci <- q(boot_kappa)
+sensF_ci <- q(boot_sensF)
+specF_ci <- q(boot_specF)
+sensM_ci <- q(boot_sensM)
+specM_ci <- q(boot_specM)
+auc_ci   <- q(boot_auc)
+
+cat("\n--- Bootstrap 95% CIs (n = ", n_boot, ") ---\n", sep = "")
+cat(sprintf("Accuracy: Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_acc, na.rm = TRUE), acc_ci[1], acc_ci[2]))
+cat(sprintf("BER:      Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_ber, na.rm = TRUE), ber_ci[1], ber_ci[2]))
+cat(sprintf("Kappa:    Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_kappa, na.rm = TRUE), kappa_ci[1], kappa_ci[2]))
+cat(sprintf("Sens(F):  Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_sensF, na.rm = TRUE), sensF_ci[1], sensF_ci[2]))
+cat(sprintf("Spec(F):  Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_specF, na.rm = TRUE), specF_ci[1], specF_ci[2]))
+cat(sprintf("Sens(M):  Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_sensM, na.rm = TRUE), sensM_ci[1], sensM_ci[2]))
+cat(sprintf("Spec(M):  Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_specM, na.rm = TRUE), specM_ci[1], specM_ci[2]))
+cat(sprintf("AUCROC:   Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_auc, na.rm = TRUE), auc_ci[1], auc_ci[2]))
 
 
 ```
