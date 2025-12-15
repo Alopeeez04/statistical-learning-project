@@ -26,8 +26,10 @@ library(ellipse)
 library(knitr)
 
 # Multivariate analysis
-library(pls)
+#library(pls)
 library(mixOmics)
+
+
 
 # Machine learning and validation
 library(caret)
@@ -299,9 +301,10 @@ An initial PLS-DA model with 10 components was trained on the training set to ev
 
 ```{r}
 #Initial PLS-DA model
-pls_initial <- plsda(X_train, y_train, ncomp = 10)
 
-plotIndiv(pls_initial, comp = c(1,2),
+pls_initial <- mixOmics::plsda(X_train, y_train, ncomp = 10)
+
+mixOmics::plotIndiv(pls_initial, comp = c(1,2),
           group = y_train, legend = TRUE,
           title = "Initial PLS-DA (Training Set)")
 ```
@@ -323,7 +326,7 @@ for (lv in 1:5) {
   auc_fold <- c()
   
   for (f in folds) {
-    model <- plsda(X_train[f,], y_train[f], ncomp = lv)
+    model <- mixOmics::plsda(X_train[f,], y_train[f], ncomp = lv)
     pred <- predict(model, X_train[-f,])$predict[,1,lv]
     roc_obj <- roc(y_train[-f], pred)
     auc_fold <- c(auc_fold, auc(roc_obj))
@@ -424,9 +427,9 @@ optimal_ncomp
 
 ```{r}
 optimal_ncomp <-3
-pls_final <- plsda(X_train, y_train, ncomp = optimal_ncomp)
+pls_final <- mixOmics::plsda(X_train, y_train, ncomp = optimal_ncomp)
 
-plotIndiv(pls_final, comp = c(1,2),
+mixOmics::plotIndiv(pls_final, comp = c(1,2),
           group = y_train, legend = TRUE,
           title = "Final PLS-DA (Training Set) — 3 components")
 ```
@@ -461,6 +464,7 @@ The final PLS-DA model does not show a visibly stronger separation because the m
 # Feature Selection: Calculate and Rank VIP Scores
 
 # Calculate and Rank VIP Scores
+
 ```{r vip_ranking}
 # 1. Extract the VIP scores matrix from the final PLS-DA model
 # We typically focus on the scores from the first component (LV1)
@@ -530,6 +534,7 @@ cat("Top selected features:", head(optimal_features_rfe, 10), "\n")
 ```
 
 # Plot the results of the RFE function and print the table
+
 ```{r}
 # Extract resampling results from RFE
 rfe_df <- rfe_results$results  
@@ -553,8 +558,8 @@ kable(round(rfe_df, 3), caption = "RFE Accuracy by Number of Features")
 
 ```
 
-
 # Final Model Training and Evaluation with Optimal Features
+
 ```{r}
 # 1. Define the number of components (LVs)
 # Use the previously optimized ncomp = 3.
@@ -565,7 +570,7 @@ X_train_optimal <- X_train[, optimal_features_rfe]
 X_test_optimal  <- X_test[, optimal_features_rfe]
 
 # 3. Train the final PLS-DA model using ONLY the optimal features
-pls_final_optimal <- plsda(X_train_optimal, y_train, ncomp = optimal_ncomp)
+pls_final_optimal <- mixOmics::plsda(X_train_optimal, y_train, ncomp = optimal_ncomp)
 
 cat("Final PLS-DA model trained with:", optimal.nfeatures.rfe, "metabolites.\n")
 
@@ -609,6 +614,7 @@ cat("Balanced Error Rate (BER):", round(ber_optimal, 4), "\n")
 ```
 
 # Visualization of Test Set Scores
+
 ```{r plot_optimal_test}
 # Visualization of Test Set Scores
 # Extract the sample scores (variates) for the optimal model
@@ -853,4 +859,3 @@ cat(sprintf("AUCROC:   Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_auc, 
 
 
 ```
-
