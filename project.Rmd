@@ -11,9 +11,7 @@ from healthy adults (60 males and 60 females), enabling independent preprocessin
 # Import Library
 
 ```{r}
-# -------------------------------
 # Libraries
-# -------------------------------
 
 # Data import and manipulation
 library(readxl)
@@ -467,7 +465,7 @@ The final PLS-DA model does not show a visibly stronger separation because the m
 
 ```{r vip_ranking}
 # 1. Extract the VIP scores matrix from the final PLS-DA model
-# We typically focus on the scores from the first component (LV1)
+# We focus on the scores from the first component (LV1)
 vip_matrix <- vip(pls_final)
 vip_scores_lv1 <- vip_matrix[, 1] 
 
@@ -484,7 +482,7 @@ vip_df <- data.frame(
 top_n <- 20
 vip_top <- head(vip_df, top_n)
 
-# Generate the bar plot
+# plot
 ggplot(vip_top, aes(x = reorder(Metabolite, VIP), y = VIP)) +
   geom_bar(stat = "identity", fill = "light blue") + 
   geom_hline(yintercept = 1, linetype = "dashed", color = "red", size = 0.8) +
@@ -554,8 +552,6 @@ ggplot(rfe_df, aes(x = Variables, y = Accuracy)) +
 # Print the table with the results to validate the plot representation
 kable(round(rfe_df, 3), caption = "RFE Accuracy by Number of Features")
 
-
-
 ```
 
 # Final Model Training and Evaluation with Optimal Features
@@ -581,7 +577,7 @@ pred_test_optimal <- predict(pls_final_optimal, X_test_optimal)
 pred_class_optimal <- pred_test_optimal$class$max.dist[, optimal_ncomp]
 
 # 5. Evaluate Performance
-cat("\n--- Performance on Test Set ---\n")
+cat("\nPerformance on Test Set\n")
 
 # Confusion Matrix
 confusion_matrix_optimal <- table(True = y_test, Predicted = pred_class_optimal)
@@ -640,7 +636,7 @@ ggplot(test_df_optimal, aes(Comp1, Comp2, color = Class)) +
 # External validation of the results
 
 ```{r}
-# --- External Validation on Test Set with Optimal Features ---
+# External Validation on Test Set with Optimal Features
 
 # Ensure test and train sets have the same features
 X_test_optimal <- X_test[, optimal_features_rfe]
@@ -677,7 +673,7 @@ roc_obj <- roc(y_test_num, pred_scores)
 auc_val <- auc(roc_obj)
 cat("AUC:", round(auc_val, 4), "\n")
 
-# --- Bootstrap Confidence Intervals ---
+# Bootstrap Confidence Intervals
 set.seed(123)
 n_boot <- 1000
 boot_acc <- numeric(n_boot)
@@ -707,7 +703,7 @@ for (i in 1:n_boot) {
 acc_ci <- quantile(boot_acc, probs = c(0.025, 0.975))
 auc_ci <- quantile(boot_auc, probs = c(0.025, 0.975), na.rm = TRUE)
 
-cat("\n--- Bootstrap Confidence Intervals (n =", n_boot, ") ---\n")
+cat("\n Bootstrap Confidence Intervals (n =", n_boot, ") \n")
 cat("Accuracy: Mean =", round(mean(boot_acc), 4),
     " | 95% CI =", round(acc_ci[1], 4), "-", round(acc_ci[2], 4), "\n")
 cat("AUCROC:  Mean =", round(mean(boot_auc, na.rm = TRUE), 4),
@@ -716,7 +712,7 @@ cat("AUCROC:  Mean =", round(mean(boot_auc, na.rm = TRUE), 4),
 ```
 
 ```{r}
-# --- Figure of Merit Uncertainty (Bootstrap 95% CI) ---
+# Figure of Merit Uncertainty (Bootstrap 95% CI)
 
 # Point estimates on the held-out test set
 conf_matrix <- table(True = y_test, Predicted = pred_class_optimal)
@@ -745,7 +741,7 @@ y_test_num <- as.numeric(y_test) - 1
 pred_scores <- pred_test_optimal$predict[,1,optimal_ncomp]
 auc_point <- as.numeric(auc(roc(y_test_num, pred_scores)))
 
-cat("\n--- Point estimates (Test Set) ---\n")
+cat("\n Point estimates (Test Set) \n")
 cat(sprintf("Accuracy = %.4f\n", metrics_point$accuracy))
 cat(sprintf("BER      = %.4f\n", metrics_point$BER))
 cat(sprintf("Kappa    = %.4f\n", metrics_point$kappa))
@@ -753,7 +749,7 @@ cat(sprintf("Sens(F)  = %.4f | Spec(F) = %.4f\n", metrics_point$sensitivity_fema
 cat(sprintf("Sens(M)  = %.4f | Spec(M) = %.4f\n", metrics_point$sensitivity_male, metrics_point$specificity_male))
 cat(sprintf("AUCROC   = %.4f\n", auc_point))
 
-# --- Bootstrap CIs for Accuracy, BER, Kappa, Sens/Spec (both classes), and AUC ---
+# Bootstrap CIs for Accuracy, BER, Kappa, Sens/Spec (both classes), and AUC
 set.seed(123)
 n_boot <- 1000
 
@@ -827,7 +823,7 @@ sensM_ci <- q(boot_sensM)
 specM_ci <- q(boot_specM)
 auc_ci   <- q(boot_auc)
 
-cat("\n--- Bootstrap 95% CIs (n = ", n_boot, ") ---\n", sep = "")
+cat("\n Bootstrap 95% CIs (n = ", n_boot, ") \n", sep = "")
 cat(sprintf("Accuracy: Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_acc, na.rm = TRUE), acc_ci[1], acc_ci[2]))
 cat(sprintf("BER:      Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_ber, na.rm = TRUE), ber_ci[1], ber_ci[2]))
 cat(sprintf("Kappa:    Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_kappa, na.rm = TRUE), kappa_ci[1], kappa_ci[2]))
