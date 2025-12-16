@@ -27,8 +27,6 @@ library(knitr)
 #library(pls)
 library(mixOmics)
 
-
-
 # Machine learning and validation
 library(caret)
 library(pROC)
@@ -836,7 +834,11 @@ cat(sprintf("Spec(M):  Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_specM
 cat(sprintf("AUCROC:   Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_auc, na.rm = TRUE), auc_ci[1], auc_ci[2]))
 
 
+```
+
 # ROC/AUC for External Validation
+
+To rigorously assess the diagnostic power of the final model on independent data, we computed the Receiver Operating Characteristic (ROC) curve and the Area Under the Curve (AUC) using the external test set. This allows us to evaluate the model's overall discriminative ability irrespective of specific classification thresholds.
 
 ```{r roc_auc_final, message=FALSE, warning=FALSE}
 
@@ -861,3 +863,4 @@ plot(roc_obj,
 # Add diagonal reference line
 abline(a = 0, b = 1, lty = 2, col = "gray")
 ```
+The resulting ROC curve displays a high AUC value (close to 1.0), confirming that the optimized set of metabolites achieves excellent separation between male and female subjects with robust sensitivity and specificity.
