@@ -44,13 +44,15 @@ library(DescTools)
 raw_df <- read_excel("41598_2018_29592_MOESM2_ESM.xlsx")
 ```
 
-```{r}
+```{r import_data, message=FALSE, warning=FALSE}
 sex_labels <- unlist(raw_df[3, 17:136])
 sex <- as.factor(sex_labels)
 
 df <- read_excel("41598_2018_29592_MOESM2_ESM.xlsx", skip = 6)
 
-glimpse(df)
+#glimpse(df)
+head(df)
+dim(df)
 ```
 
 # Cleaning and Data Transformation
@@ -132,7 +134,7 @@ par(mfrow = c(1,1))
 
 The raw intensity histograms show strong right-skewness with extreme values. After log10 transformation, the distributions become more symmetric and less heteroscedastic, supporting the use of log-transformed and autoscaled data for PCA and PLS-DA.
 
-# Non linear
+# Non linearity
 
 ```{r}
 # Convert to standard data frame to avoid tibble recycling issues
@@ -141,7 +143,7 @@ X_nozero <- as.data.frame(X)
 for(i in 1:nrow(X_nozero)){
   row_vals <- as.numeric(X_nozero[i, ])  # convert row to numeric vector
 
-  # Safeguard: if the row is all zeros (rare but possible)
+  # Safeguard: if the row is all zeros 
   if(all(row_vals == 0)){
     row_vals[row_vals == 0] <- 1  # placeholder before log10
   } else {
@@ -201,7 +203,6 @@ identical(length(sex), nrow(pca$x))
 ```{r}
 pca_scores <- as.data.frame(pca$x[, 1:2])
 
-
 center <- colMeans(pca_scores)
 cov_mat <- cov(pca_scores)
 
@@ -213,7 +214,7 @@ cutoff <- qchisq(0.95, df = 2)
 # plot with condidese matrix
 plot(pca$x[,1], pca$x[,2], 
      pch = 19, 
-     col = ifelse(distances > cutoff, "red", "black"), # Outliers a vermelho
+     col = ifelse(distances > cutoff, "red", "black"), # Outliers red
      xlab = "PC1", ylab = "PC2", 
      main = "PCA Outlier Detection (95% CI)")
 
@@ -274,6 +275,7 @@ We split the data into training and test sets (70/30) and perform univariate t-t
 ```{r}
 set.seed(123)
 
+# split the data into training and test sets(70/30)
 train_index <- createDataPartition(sex, p = 0.7, list = FALSE)
 
 X_train <- X_scaled[train_index, ]
@@ -507,7 +509,7 @@ rfe_control <- rfeControl(
   method = "repeatedcv",
   number = 5,
   repeats = 5,
-  verbose = TRUE,          # suppress intermediate output
+  verbose = FALSE,          # suppress intermediate output
   returnResamp = "all"
 )
 
@@ -832,26 +834,3 @@ cat(sprintf("Spec(F):  Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_specF
 cat(sprintf("Sens(M):  Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_sensM, na.rm = TRUE), sensM_ci[1], sensM_ci[2]))
 cat(sprintf("Spec(M):  Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_specM, na.rm = TRUE), specM_ci[1], specM_ci[2]))
 cat(sprintf("AUCROC:   Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_auc, na.rm = TRUE), auc_ci[1], auc_ci[2]))
-
-
-```
-
-```{r}
-
-
-```
-
-```{r}
-
-
-```
-
-```{r}
-
-
-```
-
-```{r}
-
-
-```
