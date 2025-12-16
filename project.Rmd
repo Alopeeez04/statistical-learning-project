@@ -740,6 +740,8 @@ abline(a = 0, b = 1, lty = 2, col = "gray")
 ```
 The resulting ROC curve displays a high AUC value (close to 1.0), confirming that the optimized set of metabolites achieves excellent separation between male and female subjects with robust sensitivity and specificity.
 
+# Figure of Merit Uncertainty (Bootstrap 95% CI)
+
 ```{r}
 # Figure of Merit Uncertainty (Bootstrap 95% CI)
 
