@@ -834,3 +834,30 @@ cat(sprintf("Spec(F):  Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_specF
 cat(sprintf("Sens(M):  Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_sensM, na.rm = TRUE), sensM_ci[1], sensM_ci[2]))
 cat(sprintf("Spec(M):  Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_specM, na.rm = TRUE), specM_ci[1], specM_ci[2]))
 cat(sprintf("AUCROC:   Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_auc, na.rm = TRUE), auc_ci[1], auc_ci[2]))
+
+
+# ROC/AUC for External Validation
+
+```{r roc_auc_final, message=FALSE, warning=FALSE}
+
+# Predict on test set (extract scores for the positive class)
+pred_test <- predict(pls_final_optimal, X_test_optimal)
+scores <- pred_test$predict[, 2, optimal_ncomp]
+
+# Calculate ROC and AUC
+roc_obj <- roc(y_test, scores, levels = rev(levels(y_test)), quiet = TRUE)
+auc_val <- auc(roc_obj)
+
+# Output AUC value
+cat("Final Model AUC:", round(auc_val, 4), "\n")
+
+# Plot ROC Curve
+plot(roc_obj, 
+     main = paste("ROC Curve - External Validation\nAUC =", round(auc_val, 3)),
+     col = "#1c61b6", 
+     lwd = 2, 
+     legacy.axes = TRUE)
+
+# Add diagonal reference line
+abline(a = 0, b = 1, lty = 2, col = "gray")
+```
