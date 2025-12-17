@@ -1,0 +1,899 @@
+---
+title: "project"
+author: ""
+date: "2025-11-25"
+output: html_document
+---
+
+The dataset used in this project corresponds to the supplementary file MOESM2 (ESM) from the publication by Fan et al. (2018). It contains the raw GC-TOF-MS metabolomics data for 120 urine samples
+from healthy adults (60 males and 60 females), enabling independent preprocessing, exploratory analysis, feature selection, and classification.
+
+# Import Library
+
+```{r}
+# Libraries
+
+# Data import and manipulation
+library(readxl)
+library(dplyr)
+library(tidyverse)
+
+# Visualization
+library(ggplot2)
+library(ellipse)
+library(knitr)
+
+# Multivariate analysis
+#library(pls)
+library(mixOmics)
+
+# Machine learning and validation
+library(caret)
+library(pROC)
+
+# Statistics and utilities
+library(DescTools)
+
+```
+
+# Import dataset
+
+```{r}
+raw_df <- read_excel("41598_2018_29592_MOESM2_ESM.xlsx")
+```
+
+```{r import_data, message=FALSE, warning=FALSE}
+sex_labels <- unlist(raw_df[3, 17:136])
+sex <- as.factor(sex_labels)
+
+df <- read_excel("41598_2018_29592_MOESM2_ESM.xlsx", skip = 6)
+
+#glimpse(df)
+head(df)
+dim(df)
+```
+
+# Cleaning and Data Transformation
+
+```{r}
+# organize names
+# first df line has de colnames
+colnames(df) <- as.character(unlist(df[1, ]))
+df <- df[-1, , drop = FALSE]
+
+# Convert measurement columns (17:end) to numeric explicitly
+measure_cols <- 17:ncol(df)
+
+for (i in measure_cols) {
+  df[[i]] <- as.numeric(df[[i]])
+}
+
+
+X <- as.data.frame(df[, measure_cols])
+
+colnames(X) <- paste0("S", seq_len(ncol(X)))
+# number of metabolites and samples
+if ("Metabolite" %in% colnames(df)) {
+  rownames(X) <- df$Metabolite
+}
+
+dim(X)
+
+```
+
+It matches with the article 120 samples (60 males + 60 females)
+
+# Summary statistics
+
+```{r}
+summary(X)
+```
+
+```{r}
+# Count total zero values
+sum(X == 0, na.rm = TRUE)
+```
+
+```{r}
+# Missing values check
+sum(is.na(X))
+```
+
+# Is it the data Gaussian Distributed?
+
+```{r}
+par(mfrow=c(1,2))
+hist(as.numeric(X[1,]), main="Raw Distribution", xlab="Intensity")
+qqnorm(as.numeric(X[1,]), main="QQ Plot Raw")
+qqline(as.numeric(X[1,]))
+par(mfrow=c(1,1))
+```
+
+# Histogram inspection
+
+To assess distributional properties, histogram inspection was performed. Raw metabolite intensities showed pronounced right-skewness, supporting the need for a log-transformation to improve normality and stabilize variance prior to multivariate analysis.
+
+```{r}
+feat1 <- as.numeric(X[[1]]) #S1
+feat2 <- as.numeric(X[[2]]) #S2
+
+par(mfrow = c(2,2))
+
+# Raw intensity distributions
+hist(feat1, main = "Raw Intensities - Feature 1", xlab = "", col = "lightgray")
+hist(feat2, main = "Raw Intensities - Feature 2", xlab = "", col = "lightgray")
+
+# After log10 transformation
+hist(log10(feat1 + 1), main = "Log10 - Feature 1", xlab = "", col = "lightgray")
+hist(log10(feat2 + 1), main = "Log10 - Feature 2", xlab = "", col = "lightgray")
+
+par(mfrow = c(1,1))
+```
+
+The raw intensity histograms show strong right-skewness with extreme values. After log10 transformation, the distributions become more symmetric and less heteroscedastic, supporting the use of log-transformed and autoscaled data for PCA and PLS-DA.
+
+# Non linearity
+
+```{r}
+# Convert to standard data frame to avoid tibble recycling issues
+X_nozero <- as.data.frame(X)
+
+for(i in 1:nrow(X_nozero)){
+  row_vals <- as.numeric(X_nozero[i, ])  # convert row to numeric vector
+
+  # Safeguard: if the row is all zeros 
+  if(all(row_vals == 0)){
+    row_vals[row_vals == 0] <- 1  # placeholder before log10
+  } else {
+    min_val <- min(row_vals[row_vals > 0], na.rm = TRUE)
+    row_vals[row_vals == 0] <- min_val / 2
+  }
+
+  X_nozero[i, ] <- row_vals  # assign back properly
+}
+```
+
+# PCA
+
+A preliminary variance-based feature filtering step (top 20% most variable metabolites) was evaluated as an unsupervised method for noise reduction and dimensionality control. However, this procedure resulted in the removal of several metabolites previously identified as statistically significant in the univariate analysis, consequently reducing the number of biologically relevant features and weakening the discrimination between sexes in downstream multivariate models. Therefore, variance filtering was not retained in the final workflow to preserve subtle yet meaningful metabolic differences.
+
+The matrix was transposed so that samples correspond to rows and metabolites to columns, which is the correct structure required for multivariate analyses such as PCA and PLS-DA, where each row must represent an independent observation:
+
+-   With \<- scale(t(X_log)).
+
+```{r}
+# Log10 transformation
+X_log <- log10(X_nozero)
+
+# Scaling for PCA (samples as rows)
+X_scaled <- scale(t(X_log))
+
+# PCA
+pca <- prcomp(X_scaled, center = TRUE, scale. = FALSE)
+summary(pca)
+
+```
+
+-   Summary statistics show very different scales and non-normal distributions
+
+-   A few zero values detected → replaced with half of minimum value\
+    → required for log10 transformation
+
+-   Applied log10(x) to reduce skewness and stabilize variance
+
+-   Autoscaling (mean-center + unit variance) to make metabolites comparable
+
+```{r}
+# Sanity check: do sex labels align with PCA samples?
+sex_row <- as.character(raw_df[3, ])
+sample_names_raw <- sex_row[sex_row %in% c("Male", "Female")]
+sample_cols <- colnames(X)
+
+sex <- factor(sample_names_raw[1:length(sample_cols)])
+
+length(sex)
+table(sex)
+all(!is.na(sex))
+identical(length(sex), nrow(pca$x))
+
+```
+
+```{r}
+pca_scores <- as.data.frame(pca$x[, 1:2])
+
+center <- colMeans(pca_scores)
+cov_mat <- cov(pca_scores)
+
+distances <- mahalanobis(pca_scores, center, cov_mat)
+
+# Cutoff (chi with p=0.95 and 2 df)
+cutoff <- qchisq(0.95, df = 2)
+
+# plot with condidese matrix
+plot(pca$x[,1], pca$x[,2], 
+     pch = 19, 
+     col = ifelse(distances > cutoff, "red", "black"), # Outliers red
+     xlab = "PC1", ylab = "PC2", 
+     main = "PCA Outlier Detection (95% CI)")
+
+lines(ellipse(cov_mat, centre = center, level = 0.95), col="blue", lty=2)
+
+text(pca$x[,1], pca$x[,2], 
+     labels = ifelse(distances > cutoff, rownames(pca$x), ""), 
+     pos = 3, cex = 0.7)
+
+# Identify outliers
+outliers <- which(distances > cutoff)
+print(paste("Outliers detected:", length(outliers)))
+```
+
+We detected 9 outliers, but they weren't removed because outliers reflect real biological variability within the healthy population. Removing them could introduce bias, especially if outliers are unevenly distributed between sexes. Furthermore, the original study did not exclude any samples all 120 subjects were analyzed in full.
+
+# PCA after log transformation
+
+```{r}
+score_df <- data.frame(
+  PC1 = pca$x[,1],
+  PC2 = pca$x[,2],
+  Sex = sex
+)
+
+ggplot(score_df, aes(PC1, PC2, color = Sex)) +
+  geom_point(size = 3) +
+  theme_classic() +
+  ggtitle("PCA After Log10 Transform + Scaling")
+
+
+```
+
+```{r}
+# Scree plot (PCA Variance Explained)
+variance <- pca$sdev^2 / sum(pca$sdev^2)
+
+plot(variance[1:10], type="b", pch=19,
+     xlab="PC", ylab="Proportion of Variance",
+     main="Scree Plot - PCA")
+
+```
+
+-   Score plot shows a trend of separation between Male and Female
+
+-   Some possible outliers appear (next step: detection)
+
+-   Scree Plot indicates PC1+PC2 explain ~20–30% variance → normal for metabolomics
+
+# Split Test/Training
+
+We split the data into training and test sets (70/30) and perform univariate t-tests on the training set only. FDR correction is applied to identify metabolites significantly different between sexes.
+
+```{r}
+set.seed(123)
+
+# split the data into training and test sets(70/30)
+train_index <- createDataPartition(sex, p = 0.7, list = FALSE)
+
+X_train <- X_scaled[train_index, ]
+X_test  <- X_scaled[-train_index, ]
+
+X_train <- as.data.frame(X_train)
+X_test  <- as.data.frame(X_test)
+
+y_train <- sex[train_index]
+y_test  <- sex[-train_index]
+
+pvals <- apply(X_train, 2, function(x) t.test(x ~ y_train)$p.value)
+pvals_fdr <- p.adjust(pvals, method = "fdr")
+
+head(sort(pvals_fdr))
+```
+
+Several metabolites show significant sex differences (FDR < 0.05). These will be considered as candidates for biomarker selection in the supervised modeling step.
+
+# Initials PLS-DA
+
+An initial PLS-DA model with 10 components was trained on the training set to evaluate whether the metabolomic profiles discriminate between sexes.
+
+```{r}
+#Initial PLS-DA model
+
+pls_initial <- mixOmics::plsda(X_train, y_train, ncomp = 10)
+
+mixOmics::plotIndiv(pls_initial, comp = c(1,2),
+          group = y_train, legend = TRUE,
+          title = "Initial PLS-DA (Training Set)")
+```
+
+The PLS-DA score plot shows a clear separation between males and females along the first two latent variables, indicating strong sex-related differences in urinary metabolomic profiles.
+
+# Internal Validation: 5-Fold CV + AUCROC
+
+A 5-fold cross-validation was used on the training set to determine the optimal number of latent variables (LVs) for the PLS-DA model, using AUC as the performance metric.
+
+```{r}
+
+set.seed(123)
+
+folds <- createFolds(y_train, k = 5, returnTrain = TRUE)
+auc_results <- data.frame(LV = integer(), AUC = numeric())
+
+for (lv in 1:5) {
+  auc_fold <- c()
+  
+  for (f in folds) {
+    model <- mixOmics::plsda(X_train[f,], y_train[f], ncomp = lv)
+    pred <- predict(model, X_train[-f,])$predict[,1,lv]
+    roc_obj <- roc(y_train[-f], pred)
+    auc_fold <- c(auc_fold, auc(roc_obj))
+  }
+  
+  auc_results <- rbind(auc_results,
+                       data.frame(LV = lv,
+                                  AUC = mean(auc_fold)))
+}
+
+auc_results
+
+```
+
+LV = 3 showed the highest mean AUC, and was therefore selected as the optimal number of components for the final PLS-DA model.
+
+# Univariate Analysis on Training set (Male vs Female)
+
+Univariate Welch t-tests were applied to each metabolite in the training set, followed by FDR correction. Mean differences (Male – Female) were calculated to determine the direction of change.
+
+```{r}
+# Compute raw p-values using Welch t-test for each metabolite
+pvals <- apply(X_train, 2, function(x) t.test(x ~ y_train)$p.value)
+
+# FDR correction (Benjamini-Hochberg)
+pvals_fdr <- p.adjust(pvals, method = "fdr")
+
+
+fc <- apply(X_train, 2, function(x) mean(x[y_train == "Male"]) -
+                               mean(x[y_train == "Female"]))
+
+
+uni_results <- data.frame(
+  Metabolite = colnames(X_train),
+  p_value = pvals,
+  p_FDR = pvals_fdr,
+  mean_diff = fc
+)
+
+
+uni_results <- uni_results[order(uni_results$p_FDR), ]
+significant <- uni_results[uni_results$p_FDR < 0.05, ]
+significant
+
+```
+
+Several metabolites showed significant sex differences (FDR < 0.05). These features represent potential biomarkers and will be further evaluated in the supervised model.
+
+# Volcano Plot - Univariate Analysis
+
+A volcano plot was generated to visualize effect size (mean difference) against statistical significance (FDR-corrected p-values).
+
+```{r}
+volcano <- uni_results
+volcano$logP <- -log10(volcano$p_FDR)
+
+ggplot(volcano, aes(x = mean_diff, y = logP)) +
+  geom_point(alpha = 0.7) +
+  geom_hline(yintercept = -log10(0.05), col = "red", lty = 2) +
+  theme_classic() +
+  xlab("Mean Difference (Male – Female)") +
+  ylab("-log10(FDR)") +
+  ggtitle("Volcano Plot — Univariate Analysis (Training Set)")
+
+```
+
+Univariate analysis performed on the training set identified 9 metabolites with significant sex-related differences after FDR correction (p_FDR < 0.05). Six metabolites (V22, V399, V84, V51, V291, V57) showed higher concentrations in females, while three metabolites (V10, V113, V250) were higher in males. The strongest discriminators were V22 and V399 (FDR < 0.005).
+
+```{r}
+colnames(X_train) <- paste0("X", 1:ncol(X_train))
+colnames(X_test)  <- paste0("X", 1:ncol(X_test))
+
+y_train <- as.factor(y_train)
+y_test  <- as.factor(y_test)
+```
+
+```{r}
+set.seed(30)
+
+perf_res <- perf(pls_initial,
+                 validation = "Mfold",
+                 folds = 5,
+                 nrepeat = 5,
+                 progressBar = FALSE)
+
+plot(perf_res, sd = TRUE)
+
+```
+
+Calculate the optimal number of components, using other metrics, like BER. This shows that increasing the number of components doesn't always decrease the error.
+
+As an additional exploratory validation, the perf() method from mixOmics was applied. Although BER suggested 4 components, this criterion is less appropriate for binary classification than AUC. Therefore, AUC-based tuning remained the primary selection method.
+
+```{r}
+optimal_ncomp <- which.min(perf_res$error.rate$BER)
+optimal_ncomp
+```
+
+```{r}
+optimal_ncomp <-3
+pls_final <- mixOmics::plsda(X_train, y_train, ncomp = optimal_ncomp)
+
+mixOmics::plotIndiv(pls_final, comp = c(1,2),
+          group = y_train, legend = TRUE,
+          title = "Final PLS-DA (Training Set) — 3 components")
+```
+
+We selected n = 3 components because they maximised the AUC during cross-validation while avoiding unnecessary model complexity. Although BER suggested 4 components, the improvement was marginal and adding extra components risks overfitting, especially in a two-class dataset.
+
+```{r}
+pred_test <- predict(pls_final, X_test)
+pred_class <- pred_test$class$max.dist[, optimal_ncomp]
+
+table(True = y_test, Predicted = pred_class)
+mean(pred_class == y_test)
+```
+
+```{r}
+test_variates <- pred_test$variates
+
+test_df <- data.frame(
+  Comp1 = test_variates[,1],
+  Comp2 = if (optimal_ncomp >= 2) test_variates[,2] else rep(0, nrow(test_variates)),
+  Class = y_test
+)
+
+ggplot(test_df, aes(Comp1, Comp2, color = Class)) +
+  geom_point(size = 3) +
+  theme_minimal() +
+  ggtitle("PLS-DA Test Set Scores")
+```
+
+The final PLS-DA model does not show a visibly stronger separation because the main class structure was already captured by the first two components in the initial model. Tuning improves model stability and classification performance, but these gains occur mostly beyond component 2, which is why the 2D score plot appears similar.
+
+# Feature Selection:
+
+## Calculate and Rank VIP Scores
+
+The VIP score for each metabolite measures its relevance to the model components and the classification of the samples.
+
+```{r vip_ranking}
+# 1. Extract the VIP scores matrix from the final PLS-DA model
+# We focus on the scores from the first component (LV1)
+vip_matrix <- vip(pls_final)
+vip_scores_lv1 <- vip_matrix[, 1] 
+
+# 2. Order the metabolites from most important to least important
+vip_ranked <- sort(vip_scores_lv1, decreasing = TRUE)
+
+# 3. Convert to a data frame for plotting and analysis
+vip_df <- data.frame(
+  Metabolite = names(vip_ranked),
+  VIP = vip_ranked
+)
+
+# 4. Visualize the top 20 most important metabolites
+top_n <- 20
+vip_top <- head(vip_df, top_n)
+
+# plot
+ggplot(vip_top, aes(x = reorder(Metabolite, VIP), y = VIP)) +
+  geom_bar(stat = "identity", fill = "light blue") + 
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red", size = 0.8) +
+  coord_flip() + 
+  theme_minimal(base_size = 14) +
+  labs(title = paste("Top", top_n, "Metabolites by VIP Score (LV1)"),
+       y = "VIP Score",
+       x = "Metabolite")
+```
+
+The plot highlighted features like V22, V399, V84, and V51 as having the highest scores, all significantly exceeding the standard threshold of VIP > 1.
+
+# Implement Recursive Feature Elimination (RFE) using the k-NN Classifier
+
+We then implemented Recursive Feature Elimination (RFE), a supervised approach, using the k-Nearest Neighbors (k-NN) classifier to determine the optimal, minimal set of metabolites that maximizes classification accuracy.
+
+```{r rfe_knn_execution}
+set.seed(123)
+
+# Define subset sizes for RFE
+subset_sizes <- c(2, 5, 10, 15, 20, 25, 30, 40, 50)
+
+# RFE control with default caret functions
+rfe_control <- rfeControl(
+  functions = caretFuncs,   # default ranking
+  method = "repeatedcv",
+  number = 5,
+  repeats = 5,
+  verbose = FALSE,          # suppress intermediate output
+  returnResamp = "all"
+)
+
+# Execute RFE
+rfe_results <- rfe(
+  x = X_train,
+  y = y_train,
+  sizes = subset_sizes,
+  rfeControl = rfe_control,
+  method = "knn",
+  tuneLength = 5,
+  metric = "Accuracy",
+  preProcess = c("center","scale")
+)
+
+# Extract optimal features
+optimal.nfeatures.rfe <- rfe_results$bestSubset
+optimal_features_rfe <- rfe_results$optVariables
+
+cat("Optimal number of features:", optimal.nfeatures.rfe, "\n")
+cat("Top selected features:", head(optimal_features_rfe, 10), "\n")
+```
+
+# Plot the results of the RFE function and print the table
+
+```{r}
+# Extract resampling results from RFE
+rfe_df <- rfe_results$results  
+
+# Plot accuracy vs. number of variables
+ggplot(rfe_df, aes(x = Variables, y = Accuracy)) +
+  geom_line(color = "steelblue", size = 1.2) +
+  geom_point(size = 3, color = "steelblue") +
+  geom_point(data = subset(rfe_df, Variables == rfe_results$bestSubset),
+             aes(x = Variables, y = Accuracy),
+             color = "red", size = 4, shape = 21, fill = "red") +
+  theme_minimal(base_size = 14) +
+  labs(title = "RFE Accuracy vs. Number of Features",
+       x = "Number of Features",
+       y = "Accuracy (Repeated CV)")
+
+# Print the table with the results to validate the plot representation
+kable(round(rfe_df, 3), caption = "RFE Accuracy by Number of Features")
+
+```
+
+The process identified the optimal number of features to be 20.
+The model achieved a maximum cross-validated accuracy of 0.720 using this subset.
+
+# Final Model Training and Evaluation with Optimal Features
+
+The final PLS-DA model was trained using the 20 metabolites selected by the RFE procedure and the previously optimized number of latent variables (n = 3). Restricting the model to this reduced feature set was intended to limit model complexity while retaining metabolites that contributed most to class discrimination during training.
+
+```{r}
+# 1. Define the number of components (LVs)
+# Use the previously optimized ncomp = 3.
+optimal_ncomp <- 3 
+
+# 2. Subset the training and test data to only the optimal features
+X_train_optimal <- X_train[, optimal_features_rfe]
+X_test_optimal  <- X_test[, optimal_features_rfe]
+
+# 3. Train the final PLS-DA model using ONLY the optimal features
+pls_final_optimal <- mixOmics::plsda(X_train_optimal, y_train, ncomp = optimal_ncomp)
+
+cat("Final PLS-DA model trained with:", optimal.nfeatures.rfe, "metabolites.\n")
+
+# 4. Predict on the Test Set
+pred_test_optimal <- predict(pls_final_optimal, X_test_optimal)
+
+# Extract predicted class using max distance for the chosen ncomp
+pred_class_optimal <- pred_test_optimal$class$max.dist[, optimal_ncomp]
+
+# 5. Evaluate Performance
+cat("\nPerformance on Test Set\n")
+
+# Confusion Matrix
+confusion_matrix_optimal <- table(True = y_test, Predicted = pred_class_optimal)
+print(confusion_matrix_optimal)
+
+# Overall Accuracy
+accuracy_optimal <- mean(pred_class_optimal == y_test)
+cat("\nOverall Accuracy:", round(accuracy_optimal, 4), "\n")
+
+# Custom BER function (can't be exported directly)
+BER <- function(conf_matrix) {
+  # Convert to matrix
+  cm <- as.matrix(conf_matrix)
+  
+  # Assume binary classification: rows = true, cols = predicted
+  # Sensitivity for class 1
+  sens1 <- cm[1,1] / sum(cm[1,])
+  # Sensitivity for class 2
+  sens2 <- cm[2,2] / sum(cm[2,])
+  
+  # BER = 1 - mean(sensitivities)
+  ber <- 1 - mean(c(sens1, sens2))
+  return(ber)
+}
+
+ber_optimal <- BER(confusion_matrix_optimal)
+cat("Balanced Error Rate (BER):", round(ber_optimal, 4), "\n")
+
+
+```
+
+Model performance was evaluated on the independent test set. The confusion matrix showed similar classification performance for male and female samples. The overall accuracy indicated that the model retained predictive ability on unseen data. The Balanced Error Rate (BER) further suggested that misclassification rates were comparable between classes and that performance was not driven by class imbalance.
+
+# Visualization of Test Set Scores
+
+```{r plot_optimal_test}
+# Visualization of Test Set Scores
+# Extract the sample scores (variates) for the optimal model
+test_variates_optimal <- pred_test_optimal$variates
+
+# Create a data frame for plotting
+test_df_optimal <- data.frame(
+  Comp1 = test_variates_optimal[,1],
+  Comp2 = if (optimal_ncomp >= 2) test_variates_optimal[,2] else rep(0, nrow(test_variates_optimal)),
+  Class = y_test
+)
+
+# Generate the Score Plot
+ggplot(test_df_optimal, aes(Comp1, Comp2, color = Class)) +
+  geom_point(size = 3) +
+  theme_minimal(base_size = 14) +
+  scale_color_manual(values = c("Female" = "red", "Male" = "blue")) +
+  ggtitle(paste("Final PLS-DA Test Set Scores (Features:", optimal.nfeatures.rfe, ")")) +
+  labs(x = "Component 1", y = "Component 2")
+
+```
+
+The score plot displays the projection of test set samples onto the first two latent variables of the optimized PLS-DA model.
+
+A separation trend between male and female samples is visible along the first component, indicating that the main discriminative structure learned during training was preserved in the test data. The second component captured additional within-group variability. No isolated or extreme points were observed, suggesting that the test set projections were consistent with the overall model structure.
+
+# External validation of the results
+
+External validation was carried out using the held-out test set and the final PLS-DA model trained on the selected metabolite subset.
+
+```{r}
+# External Validation on Test Set with Optimal Features
+
+# Ensure test and train sets have the same features
+X_test_optimal <- X_test[, optimal_features_rfe]
+
+# Predict with the final PLS-DA model trained on optimal features
+pred_test_optimal <- predict(pls_final_optimal, X_test_optimal)
+
+# Extract predicted classes using max distance
+pred_class_optimal <- pred_test_optimal$class$max.dist[, optimal_ncomp]
+
+# Confusion Matrix
+conf_matrix <- table(True = y_test, Predicted = pred_class_optimal)
+cat("Confusion Matrix:\n")
+print(conf_matrix)
+
+# Overall Accuracy
+accuracy <- mean(pred_class_optimal == y_test)
+cat("\nOverall Accuracy:", round(accuracy, 4), "\n")
+
+# Balanced Error Rate (BER)
+BER <- function(cm) {
+  cm <- as.matrix(cm)
+  sens <- diag(cm) / rowSums(cm)
+  1 - mean(sens)
+}
+ber <- BER(conf_matrix)
+cat("Balanced Error Rate (BER):", round(ber, 4), "\n")
+
+# ROC & AUC for binary classification
+y_test_num <- as.numeric(y_test) - 1
+pred_scores <- pred_test_optimal$predict[,1,optimal_ncomp]
+
+roc_obj <- roc(y_test_num, pred_scores)
+auc_val <- auc(roc_obj)
+cat("AUC:", round(auc_val, 4), "\n")
+
+# Bootstrap Confidence Intervals
+set.seed(123)
+n_boot <- 1000
+boot_acc <- numeric(n_boot)
+boot_auc <- numeric(n_boot)
+
+for (i in 1:n_boot) {
+  idx <- sample(seq_along(y_test), replace = TRUE)
+  Xb <- X_test_optimal[idx, ]
+  yb <- y_test[idx]
+  
+  pred_b <- predict(pls_final_optimal, Xb)
+  class_b <- pred_b$class$max.dist[, optimal_ncomp]
+  boot_acc[i] <- mean(class_b == yb)
+  
+  scores_b <- pred_b$predict[,1,optimal_ncomp]
+  yb_num <- as.numeric(yb) - 1
+  
+  if (length(unique(yb_num)) == 2) {
+    roc_b <- roc(yb_num, scores_b, quiet = TRUE)
+    boot_auc[i] <- auc(roc_b)
+  } else {
+    boot_auc[i] <- NA
+  }
+}
+
+# Report mean and 95% CI
+acc_ci <- quantile(boot_acc, probs = c(0.025, 0.975))
+auc_ci <- quantile(boot_auc, probs = c(0.025, 0.975), na.rm = TRUE)
+
+cat("\n Bootstrap Confidence Intervals (n =", n_boot, ") \n")
+cat("Accuracy: Mean =", round(mean(boot_acc), 4),
+    " | 95% CI =", round(acc_ci[1], 4), "-", round(acc_ci[2], 4), "\n")
+cat("AUCROC:  Mean =", round(mean(boot_auc, na.rm = TRUE), 4),
+    " | 95% CI =", round(auc_ci[1], 4), "-", round(auc_ci[2], 4), "\n")
+
+```
+
+
+The confusion matrix and overall accuracy showed comparable performance to that observed during model development. The Balanced Error Rate remained low, indicating balanced classification across sexes. These results suggest that the model performance observed during training was maintained when applied to independent samples.
+
+ROC analysis was used to further assess discrimination between classes. The AUC indicated that the selected metabolite panel provided good separation between male and female samples across a range of classification thresholds.
+
+
+```{r}
+# Figure of Merit Uncertainty (Bootstrap 95% CI)
+
+# Point estimates on the held-out test set
+conf_matrix <- table(True = y_test, Predicted = pred_class_optimal)
+
+# Helper metrics (binary, rows=True: Female, Male; cols=Predicted)
+metrics_point <- (function(cm) {
+  cm <- as.matrix(cm)
+  TP1 <- cm[1,1]; FN1 <- cm[1,2]; FP1 <- cm[2,1]; TN1 <- cm[2,2]
+  acc <- (TP1 + TN1) / sum(cm)
+  sens_fem <- TP1 / (TP1 + FN1)
+  spec_fem <- TN1 / (TN1 + FP1)
+  sens_male <- TN1 / (TN1 + FP1)        
+  spec_male <- TP1 / (TP1 + FN1)
+  ber <- 1 - mean(c(sens_fem, sens_male))
+  po <- acc
+  pe <- ((sum(cm[1,]) * sum(cm[,1])) + (sum(cm[2,]) * sum(cm[,2]))) / (sum(cm)^2)
+  kappa <- (po - pe) / (1 - pe)
+  list(accuracy = acc, BER = ber,
+       sensitivity_female = sens_fem, specificity_female = spec_fem,
+       sensitivity_male = sens_male, specificity_male = spec_male,
+       kappa = kappa)
+})(conf_matrix)
+
+# AUC point estimate 
+y_test_num <- as.numeric(y_test) - 1
+pred_scores <- pred_test_optimal$predict[,1,optimal_ncomp]
+auc_point <- as.numeric(auc(roc(y_test_num, pred_scores)))
+
+cat("\n Point estimates (Test Set) \n")
+cat(sprintf("Accuracy = %.4f\n", metrics_point$accuracy))
+cat(sprintf("BER      = %.4f\n", metrics_point$BER))
+cat(sprintf("Kappa    = %.4f\n", metrics_point$kappa))
+cat(sprintf("Sens(F)  = %.4f | Spec(F) = %.4f\n", metrics_point$sensitivity_female, metrics_point$specificity_female))
+cat(sprintf("Sens(M)  = %.4f | Spec(M) = %.4f\n", metrics_point$sensitivity_male, metrics_point$specificity_male))
+cat(sprintf("AUCROC   = %.4f\n", auc_point))
+
+# Bootstrap CIs for Accuracy, BER, Kappa, Sens/Spec (both classes), and AUC
+set.seed(123)
+n_boot <- 1000
+
+boot_acc  <- numeric(n_boot)
+boot_ber  <- numeric(n_boot)
+boot_kappa<- numeric(n_boot)
+boot_sensF<- numeric(n_boot)
+boot_specF<- numeric(n_boot)
+boot_sensM<- numeric(n_boot)
+boot_specM<- numeric(n_boot)
+boot_auc  <- numeric(n_boot)
+
+for (i in 1:n_boot) {
+  idx <- sample(seq_along(y_test), replace = TRUE)
+  Xb <- X_test_optimal[idx, ]
+  yb <- y_test[idx]
+
+  pred_b <- predict(pls_final_optimal, Xb)
+  class_b <- pred_b$class$max.dist[, optimal_ncomp]
+  cm <- table(True = yb, Predicted = class_b)
+
+  # Guard: ensure 2x2 matrix even if a class is missing
+  all_lvls <- levels(y_test)
+  cm <- as.matrix(cm)
+  # Rebuild complete 2x2 in fixed order (Female, Male)
+  full_cm <- matrix(0, nrow = 2, ncol = 2,
+                    dimnames = list(True = all_lvls, Predicted = all_lvls))
+  for (tr in rownames(cm)) for (pr in colnames(cm)) full_cm[tr, pr] <- cm[tr, pr]
+  cm <- full_cm
+
+  TP1 <- cm["Female","Female"]; FN1 <- cm["Female","Male"]
+  FP1 <- cm["Male","Female"];   TN1 <- cm["Male","Male"]
+
+  acc <- (TP1 + TN1) / sum(cm)
+  sensF <- if ((TP1 + FN1) > 0) TP1 / (TP1 + FN1) else NA
+  specF <- if ((TN1 + FP1) > 0) TN1 / (TN1 + FP1) else NA
+  sensM <- if ((TN1 + FP1) > 0) TN1 / (TN1 + FP1) else NA
+  specM <- if ((TP1 + FN1) > 0) TP1 / (TP1 + FN1) else NA
+  ber   <- 1 - mean(c(sensF, sensM), na.rm = TRUE)
+
+  po <- acc
+  pe <- ((sum(cm["Female",]) * sum(cm[,"Female"])) + (sum(cm["Male",]) * sum(cm[,"Male"]))) / (sum(cm)^2)
+  kappa <- if ((1 - pe) > 0) (po - pe) / (1 - pe) else NA
+
+  # AUC from scores (skip if a single class)
+  scores_b <- pred_b$predict[,1,optimal_ncomp]
+  yb_num <- as.numeric(yb) - 1
+  if (length(unique(yb_num)) == 2) {
+    boot_auc[i] <- as.numeric(auc(roc(yb_num, scores_b, quiet = TRUE)))
+  } else {
+    boot_auc[i] <- NA
+  }
+
+  boot_acc[i]   <- acc
+  boot_ber[i]   <- ber
+  boot_kappa[i] <- kappa
+  boot_sensF[i] <- sensF
+  boot_specF[i] <- specF
+  boot_sensM[i] <- sensM
+  boot_specM[i] <- specM
+}
+
+q <- function(x) quantile(x, probs = c(0.025, 0.975), na.rm = TRUE)
+
+acc_ci   <- q(boot_acc)
+ber_ci   <- q(boot_ber)
+kappa_ci <- q(boot_kappa)
+sensF_ci <- q(boot_sensF)
+specF_ci <- q(boot_specF)
+sensM_ci <- q(boot_sensM)
+specM_ci <- q(boot_specM)
+auc_ci   <- q(boot_auc)
+
+cat("\n Bootstrap 95% CIs (n = ", n_boot, ") \n", sep = "")
+cat(sprintf("Accuracy: Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_acc, na.rm = TRUE), acc_ci[1], acc_ci[2]))
+cat(sprintf("BER:      Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_ber, na.rm = TRUE), ber_ci[1], ber_ci[2]))
+cat(sprintf("Kappa:    Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_kappa, na.rm = TRUE), kappa_ci[1], kappa_ci[2]))
+cat(sprintf("Sens(F):  Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_sensF, na.rm = TRUE), sensF_ci[1], sensF_ci[2]))
+cat(sprintf("Spec(F):  Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_specF, na.rm = TRUE), specF_ci[1], specF_ci[2]))
+cat(sprintf("Sens(M):  Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_sensM, na.rm = TRUE), sensM_ci[1], sensM_ci[2]))
+cat(sprintf("Spec(M):  Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_specM, na.rm = TRUE), specM_ci[1], specM_ci[2]))
+cat(sprintf("AUCROC:   Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_auc, na.rm = TRUE), auc_ci[1], auc_ci[2]))
+
+
+```
+
+To assess the stability of the performance estimates, bootstrap resampling of the test set was performed (n = 1000). Mean accuracy and AUC values across bootstrap samples were similar to the corresponding point estimates obtained from the original test set. The 95% confidence intervals provided an estimate of the variability associated with these metrics.
+
+The bootstrap results indicate that model performance was not highly sensitive to resampling of the test data.
+
+Additional performance metrics were computed to further characterize classification behavior. Sensitivity and specificity were calculated separately for female and male samples. These measures showed similar values across classes, supporting balanced classification performance. Cohen’s kappa indicated agreement between predicted and true labels beyond chance. The Balanced Error Rate remained consistent with previous estimates.
+
+Bootstrap confidence intervals for all metrics showed limited variability, suggesting that the reported performance measures were stable within the test set.
+
+# ROC/AUC for External Validation
+
+To rigorously assess the diagnostic power of the final model on independent data, we computed the Receiver Operating Characteristic (ROC) curve and the Area Under the Curve (AUC) using the external test set. This allows us to evaluate the model's overall discriminative ability irrespective of specific classification thresholds.
+
+```{r roc_auc_final, message=FALSE, warning=FALSE}
+
+# Predict on test set (extract scores for the positive class)
+pred_test <- predict(pls_final_optimal, X_test_optimal)
+scores <- pred_test$predict[, 2, optimal_ncomp]
+
+# Calculate ROC and AUC
+roc_obj <- roc(y_test, scores, levels = rev(levels(y_test)), quiet = TRUE)
+auc_val <- auc(roc_obj)
+
+# Output AUC value
+cat("Final Model AUC:", round(auc_val, 4), "\n")
+
+# Plot ROC Curve
+plot(roc_obj, 
+     main = paste("ROC Curve - External Validation\nAUC =", round(auc_val, 3)),
+     col = "#1c61b6", 
+     lwd = 2, 
+     legacy.axes = TRUE)
+
+# Add diagonal reference line
+abline(a = 0, b = 1, lty = 2, col = "gray")
+```
+The resulting ROC curve displays a high AUC value (close to 1.0), confirming that the optimized set of metabolites achieves excellent separation between male and female subjects with robust sensitivity and specificity.
+
+
+Overall, the combination of recursive feature elimination and PLS-DA resulted in a reduced metabolite set that maintained classification performance on independent data. The evaluation metrics and uncertainty estimates suggest that the final model provides a reasonable balance between dimensionality reduction and predictive performance in this dataset.
+
