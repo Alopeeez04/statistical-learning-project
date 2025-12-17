@@ -5,11 +5,7 @@ date: "2025-11-25"
 output: html_document
 ---
 
-<<<<<<< HEAD
 The dataset used in this project corresponds to the supplementary file MOESM2 (ESM) from the publication by Fan et al. (2018). It contains the raw GC-TOF-MS metabolomics data for 120 urine samples
-=======
-The dataset used in this project corresponds to the supplementary file **MOESM2 (ESM)** from the publication by Fan et al. (2018). It contains the raw GC-TOF-MS metabolomics data for 120 urine samples\
->>>>>>> efb55ed343764b09a1ccb92e9b91fb2ccf4d7ae3
 from healthy adults (60 males and 60 females), enabling independent preprocessing, exploratory analysis, feature selection, and classification.
 
 # Import Library
@@ -231,15 +227,7 @@ outliers <- which(distances > cutoff)
 print(paste("Outliers detected:", length(outliers)))
 ```
 
-<<<<<<< HEAD
 We detected 9 outliers, but they weren't removed because outliers reflect real biological variability within the healthy population. Removing them could introduce bias, especially if outliers are unevenly distributed between sexes. Furthermore, the original study did not exclude any samples all 120 subjects were analyzed in full.
-=======
-We detected 9 outliers, but they weren't removed because:
-
-Outliers reflect **real biological variability** within the healthy population.\
-Removing them could introduce **bias**, especially if outliers are unevenly distributed between sexes.\
-Furthermore, the original study **did not exclude any samples** all **120 subjects** were analyzed in full.
->>>>>>> efb55ed343764b09a1ccb92e9b91fb2ccf4d7ae3
 
 # PCA after log transformation
 
@@ -272,11 +260,7 @@ plot(variance[1:10], type="b", pch=19,
 
 -   Some possible outliers appear (next step: detection)
 
-<<<<<<< HEAD
 -   Scree Plot indicates PC1+PC2 explain ~20–30% variance → normal for metabolomics
-=======
--   Scree Plot indicates PC1+PC2 explain \~20–30% variance → normal for metabolomics
->>>>>>> efb55ed343764b09a1ccb92e9b91fb2ccf4d7ae3
 
 # Split Test/Training
 
@@ -303,11 +287,7 @@ pvals_fdr <- p.adjust(pvals, method = "fdr")
 head(sort(pvals_fdr))
 ```
 
-<<<<<<< HEAD
 Several metabolites show significant sex differences (FDR < 0.05). These will be considered as candidates for biomarker selection in the supervised modeling step.
-=======
-Several metabolites show significant sex differences (FDR \< 0.05). These will be considered as candidates for biomarker selection in the supervised modeling step.
->>>>>>> efb55ed343764b09a1ccb92e9b91fb2ccf4d7ae3
 
 # Initials PLS-DA
 
@@ -387,11 +367,7 @@ significant
 
 ```
 
-<<<<<<< HEAD
 Several metabolites showed significant sex differences (FDR < 0.05). These features represent potential biomarkers and will be further evaluated in the supervised model.
-=======
-Several metabolites showed significant sex differences (FDR \< 0.05). These features represent potential biomarkers and will be further evaluated in the supervised model.
->>>>>>> efb55ed343764b09a1ccb92e9b91fb2ccf4d7ae3
 
 # Volcano Plot - Univariate Analysis
 
@@ -411,11 +387,7 @@ ggplot(volcano, aes(x = mean_diff, y = logP)) +
 
 ```
 
-<<<<<<< HEAD
 Univariate analysis performed on the training set identified 9 metabolites with significant sex-related differences after FDR correction (p_FDR < 0.05). Six metabolites (V22, V399, V84, V51, V291, V57) showed higher concentrations in females, while three metabolites (V10, V113, V250) were higher in males. The strongest discriminators were V22 and V399 (FDR < 0.005).
-=======
-Univariate analysis performed on the training set identified 9 metabolites with significant sex-related differences after FDR correction (p_FDR \< 0.05). Six metabolites (V22, V399, V84, V51, V291, V57) showed higher concentrations in females, while three metabolites (V10, V113, V250) were higher in males. The strongest discriminators were V22 and V399 (p_FDR \< 0.005).
->>>>>>> efb55ed343764b09a1ccb92e9b91fb2ccf4d7ae3
 
 ```{r}
 colnames(X_train) <- paste0("X", 1:ncol(X_train))
@@ -589,11 +561,8 @@ The model achieved a maximum cross-validated accuracy of 0.720 using this subset
 
 # Final Model Training and Evaluation with Optimal Features
 
-<<<<<<< HEAD
 The final PLS-DA model was trained using the 20 metabolites selected by the RFE procedure and the previously optimized number of latent variables (n = 3). Restricting the model to this reduced feature set was intended to limit model complexity while retaining metabolites that contributed most to class discrimination during training.
 
-=======
->>>>>>> efb55ed343764b09a1ccb92e9b91fb2ccf4d7ae3
 ```{r}
 # 1. Define the number of components (LVs)
 # Use the previously optimized ncomp = 3.
@@ -644,38 +613,11 @@ BER <- function(conf_matrix) {
 ber_optimal <- BER(confusion_matrix_optimal)
 cat("Balanced Error Rate (BER):", round(ber_optimal, 4), "\n")
 
-<<<<<<< HEAD
 
 ```
 
 Model performance was evaluated on the independent test set. The confusion matrix showed similar classification performance for male and female samples. The overall accuracy indicated that the model retained predictive ability on unseen data. The Balanced Error Rate (BER) further suggested that misclassification rates were comparable between classes and that performance was not driven by class imbalance.
 
-=======
-conf_df_optimal <- as.data.frame(confusion_matrix_optimal)
-colnames(conf_df_optimal) <- c("True", "Predicted", "Count")
-
-
-ggplot(conf_df_optimal, aes(x = Predicted, y = True, fill = Count)) +
-  geom_tile(color = "white", linewidth = 0.8) +
-  geom_text(aes(label = Count), size = 6, fontface = "bold") +
-  scale_fill_gradient(low = "#f7f7f7", high = "#1f78b4") +
-  labs(
-    title = "Confusion Matrix — Final PLS-DA (External Test Set)",
-    x = "Predicted Class",
-    y = "True Class",
-    fill = "Count"
-  ) +
-  theme_minimal(base_size = 14) +
-  theme(
-    plot.title = element_text(face = "bold", hjust = 0.5),
-    axis.title = element_text(face = "bold"),
-    legend.position = "right"
-  )
-
-
-```
-
->>>>>>> efb55ed343764b09a1ccb92e9b91fb2ccf4d7ae3
 # Visualization of Test Set Scores
 
 ```{r plot_optimal_test}
@@ -700,7 +642,6 @@ ggplot(test_df_optimal, aes(Comp1, Comp2, color = Class)) +
 
 ```
 
-<<<<<<< HEAD
 The score plot displays the projection of test set samples onto the first two latent variables of the optimized PLS-DA model.
 
 A separation trend between male and female samples is visible along the first component, indicating that the main discriminative structure learned during training was preserved in the test data. The second component captured additional within-group variability. No isolated or extreme points were observed, suggesting that the test set projections were consistent with the overall model structure.
@@ -709,10 +650,6 @@ A separation trend between male and female samples is visible along the first co
 
 External validation was carried out using the held-out test set and the final PLS-DA model trained on the selected metabolite subset.
 
-=======
-# External validation of the results
-
->>>>>>> efb55ed343764b09a1ccb92e9b91fb2ccf4d7ae3
 ```{r}
 # External Validation on Test Set with Optimal Features
 
@@ -787,7 +724,6 @@ cat("Accuracy: Mean =", round(mean(boot_acc), 4),
 cat("AUCROC:  Mean =", round(mean(boot_auc, na.rm = TRUE), 4),
     " | 95% CI =", round(auc_ci[1], 4), "-", round(auc_ci[2], 4), "\n")
 
-<<<<<<< HEAD
 ```
 
 
@@ -796,31 +732,6 @@ The confusion matrix and overall accuracy showed comparable performance to that 
 ROC analysis was used to further assess discrimination between classes. The AUC indicated that the selected metabolite panel provided good separation between male and female samples across a range of classification thresholds.
 
 
-=======
-
-conf_df <- as.data.frame(conf_matrix)
-colnames(conf_df) <- c("True", "Predicted", "Count")
-
-
-ggplot(conf_df, aes(x = Predicted, y = True, fill = Count)) +
-  geom_tile(color = "white", linewidth = 0.8) +
-  geom_text(aes(label = Count), size = 6, fontface = "bold") +
-  scale_fill_gradient(low = "#f0f0f0", high = "#2c7fb8") +
-  labs(
-    title = "Confusion Matrix — External Test Set",
-    x = "Predicted Class",
-    y = "True Class",
-    fill = "Count"
-  ) +
-  theme_minimal(base_size = 14) +
-  theme(
-    plot.title = element_text(face = "bold", hjust = 0.5),
-    axis.title = element_text(face = "bold"),
-    legend.position = "right"
-  )
-```
-
->>>>>>> efb55ed343764b09a1ccb92e9b91fb2ccf4d7ae3
 ```{r}
 # Figure of Merit Uncertainty (Bootstrap 95% CI)
 
@@ -834,11 +745,7 @@ metrics_point <- (function(cm) {
   acc <- (TP1 + TN1) / sum(cm)
   sens_fem <- TP1 / (TP1 + FN1)
   spec_fem <- TN1 / (TN1 + FP1)
-<<<<<<< HEAD
   sens_male <- TN1 / (TN1 + FP1)        
-=======
-  sens_male <- TN1 / (TN1 + FP1)        # sensitivity for "Male" if treating Male as positive in its own class
->>>>>>> efb55ed343764b09a1ccb92e9b91fb2ccf4d7ae3
   spec_male <- TP1 / (TP1 + FN1)
   ber <- 1 - mean(c(sens_fem, sens_male))
   po <- acc
@@ -850,11 +757,7 @@ metrics_point <- (function(cm) {
        kappa = kappa)
 })(conf_matrix)
 
-<<<<<<< HEAD
 # AUC point estimate 
-=======
-# AUC point estimate (scores from your model)
->>>>>>> efb55ed343764b09a1ccb92e9b91fb2ccf4d7ae3
 y_test_num <- as.numeric(y_test) - 1
 pred_scores <- pred_test_optimal$predict[,1,optimal_ncomp]
 auc_point <- as.numeric(auc(roc(y_test_num, pred_scores)))
@@ -954,7 +857,6 @@ cat(sprintf("AUCROC:   Mean = %.4f | 95%% CI = %.4f – %.4f\n", mean(boot_auc, 
 
 ```
 
-<<<<<<< HEAD
 To assess the stability of the performance estimates, bootstrap resampling of the test set was performed (n = 1000). Mean accuracy and AUC values across bootstrap samples were similar to the corresponding point estimates obtained from the original test set. The 95% confidence intervals provided an estimate of the variability associated with these metrics.
 
 The bootstrap results indicate that model performance was not highly sensitive to resampling of the test data.
@@ -963,8 +865,6 @@ Additional performance metrics were computed to further characterize classificat
 
 Bootstrap confidence intervals for all metrics showed limited variability, suggesting that the reported performance measures were stable within the test set.
 
-=======
->>>>>>> efb55ed343764b09a1ccb92e9b91fb2ccf4d7ae3
 # ROC/AUC for External Validation
 
 To rigorously assess the diagnostic power of the final model on independent data, we computed the Receiver Operating Characteristic (ROC) curve and the Area Under the Curve (AUC) using the external test set. This allows us to evaluate the model's overall discriminative ability irrespective of specific classification thresholds.
@@ -993,10 +893,7 @@ plot(roc_obj,
 abline(a = 0, b = 1, lty = 2, col = "gray")
 ```
 The resulting ROC curve displays a high AUC value (close to 1.0), confirming that the optimized set of metabolites achieves excellent separation between male and female subjects with robust sensitivity and specificity.
-<<<<<<< HEAD
 
 
 Overall, the combination of recursive feature elimination and PLS-DA resulted in a reduced metabolite set that maintained classification performance on independent data. The evaluation metrics and uncertainty estimates suggest that the final model provides a reasonable balance between dimensionality reduction and predictive performance in this dataset.
 
-=======
->>>>>>> efb55ed343764b09a1ccb92e9b91fb2ccf4d7ae3
